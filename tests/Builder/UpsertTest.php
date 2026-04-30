@@ -4,6 +4,7 @@ namespace Rxn\Orm\Tests\Builder;
 
 use Rxn\Orm\Builder\Insert;
 use Rxn\Orm\Builder\Raw;
+use Rxn\Orm\Tests\Support\FakeDriverConnection;
 use Rxn\Orm\Tests\Support\SqliteTestCase;
 
 final class UpsertTest extends SqliteTestCase
@@ -124,23 +125,5 @@ final class UpsertTest extends SqliteTestCase
             ->row(['key' => 'k', 'value' => 1])
             ->onDuplicateKeyUpdate(['value' => Raw::of('value + 1')])
             ->upsert(['key'], ['value']);
-    }
-}
-
-/**
- * Minimal Connection subclass that overrides driver detection.
- * Lets the upsert tests verify Postgres/MySQL syntax without
- * actually requiring those engines.
- */
-final class FakeDriverConnection extends \Rxn\Orm\Db\Connection
-{
-    public function __construct(\PDO $pdo, private string $driverOverride)
-    {
-        parent::__construct($pdo);
-    }
-
-    public function getDriver(): string
-    {
-        return $this->driverOverride;
     }
 }

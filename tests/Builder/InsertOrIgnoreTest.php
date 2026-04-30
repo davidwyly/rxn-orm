@@ -3,6 +3,7 @@
 namespace Rxn\Orm\Tests\Builder;
 
 use Rxn\Orm\Builder\Insert;
+use Rxn\Orm\Tests\Support\FakeDriverConnection;
 use Rxn\Orm\Tests\Support\SqliteTestCase;
 
 final class InsertOrIgnoreTest extends SqliteTestCase

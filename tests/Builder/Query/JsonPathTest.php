@@ -3,7 +3,7 @@
 namespace Rxn\Orm\Tests\Builder\Query;
 
 use Rxn\Orm\Builder\Query;
-use Rxn\Orm\Tests\Builder\FakeDriverConnection;
+use Rxn\Orm\Tests\Support\FakeDriverConnection;
 use Rxn\Orm\Tests\Support\SqliteTestCase;
 
 final class JsonPathTest extends SqliteTestCase

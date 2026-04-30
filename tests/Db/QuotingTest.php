@@ -7,6 +7,7 @@ use PHPUnit\Framework\TestCase;
 use Rxn\Orm\Builder\Insert;
 use Rxn\Orm\Builder\Query;
 use Rxn\Orm\Db\Connection;
+use Rxn\Orm\Tests\Support\FakeDriverConnection as FakeDriverConn;
 
 /**
  * Validates that Connection translates the builder's MySQL-style
@@ -80,18 +81,5 @@ final class QuotingTest extends TestCase
         $rows = $db->table('users')->where('id', '=', 1)->get();
         $this->assertCount(1, $rows);
         $this->assertSame('a@x', $rows[0]['email']);
-    }
-}
-
-final class FakeDriverConn extends Connection
-{
-    public function __construct(PDO $pdo, private string $driverOverride)
-    {
-        parent::__construct($pdo);
-    }
-
-    public function getDriver(): string
-    {
-        return $this->driverOverride;
     }
 }

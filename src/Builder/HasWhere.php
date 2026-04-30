@@ -331,15 +331,18 @@ trait HasWhere
      * expand it into the right driver-specific extraction. Otherwise
      * fall through to the normal identifier escape.
      *
+     * Path segments accept two shapes:
+     *   - object keys:   `[A-Za-z_][A-Za-z0-9_]*` → `'key'` lookup
+     *   - array indices: `\d+`                    → `[N]` (MySQL/SQLite)
+     *                                               or `->N` (Postgres)
+     *
      * Supported drivers (auto-detected via the attached Connection):
-     *   - mysql / mariadb / sqlite — JSON_EXTRACT(col, '$.path')
-     *   - pgsql                    — col->'a'->>'b'
+     *   - mysql / mariadb / sqlite — JSON_EXTRACT(col, '$.path[0].key')
+     *   - pgsql                    — col->'a'->0->>'b'
      *
-     * If no Connection is attached we default to the JSON_EXTRACT form
-     * (which MySQL 5.7+ and SQLite 3.38+ both support).
-     *
-     * Path keys must be `[A-Za-z_][A-Za-z0-9_]*`. For exotic keys use
-     * `Raw::of('...')` directly.
+     * If no Connection is attached we default to JSON_EXTRACT (MySQL
+     * 5.7+ and SQLite 3.38+). For exotic keys (Unicode, dots, etc.)
+     * use Raw::of() directly.
      */
     private function resolveJsonField(string $field): string
     {
@@ -349,9 +352,10 @@ trait HasWhere
         $parts = explode('->', $field);
         $col   = array_shift($parts);
         foreach ($parts as $part) {
-            if (!preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $part)) {
+            if (!preg_match('/^([A-Za-z_][A-Za-z0-9_]*|\d+)$/', $part)) {
                 throw new \InvalidArgumentException(
-                    "Invalid JSON path segment '$part' — keys must match [A-Za-z_][A-Za-z0-9_]*. " .
+                    "Invalid JSON path segment '$part' — segments must be a key " .
+                    'matching [A-Za-z_][A-Za-z0-9_]* or an array index (digits). ' .
                     'Use Raw::of() for exotic key names.',
                 );
             }
@@ -360,16 +364,27 @@ trait HasWhere
         $driver = $this->detectDriverForJsonPath();
 
         if ($driver === 'pgsql') {
+            // Postgres chains -> for intermediate (json) and ->> for
+            // final (text). Numeric segments use the unquoted form so
+            // they're treated as array indices, not string keys.
             $expr = $colRef;
             $last = array_pop($parts);
             foreach ($parts as $intermediate) {
-                $expr .= "->'" . $intermediate . "'";
+                $expr .= ctype_digit($intermediate)
+                    ? '->' . $intermediate
+                    : "->'" . $intermediate . "'";
             }
-            $expr .= "->>'" . $last . "'";
+            $expr .= ctype_digit((string)$last)
+                ? '->>' . $last
+                : "->>'" . $last . "'";
             return $expr;
         }
-        // mysql, mariadb, sqlite, or unknown: use the portable JSON_EXTRACT form.
-        $path = '$.' . implode('.', $parts);
+        // mysql, mariadb, sqlite, or unknown: $.key for object keys,
+        // $[N] for array indices.
+        $path = '$';
+        foreach ($parts as $segment) {
+            $path .= ctype_digit($segment) ? "[$segment]" : ".$segment";
+        }
         return "JSON_EXTRACT($colRef, '$path')";
     }
 
