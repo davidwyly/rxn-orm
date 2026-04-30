@@ -78,6 +78,7 @@ final class Delete extends Builder implements Buildable
         return $this->requireConnection(__FUNCTION__)->delete($this);
     }
 
+    /** @return array{0: string, 1: array<int|string, mixed>} */
     public function toSql(): array
     {
         if ($this->table === null) {

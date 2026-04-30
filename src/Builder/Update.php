@@ -96,6 +96,7 @@ final class Update extends Builder implements Buildable
         return $this;
     }
 
+    /** @return array{0: string, 1: array<int|string, mixed>} */
     public function toSql(): array
     {
         if ($this->table === null) {

@@ -89,7 +89,7 @@ class ModelQuery extends Query
      * mutations don't leak into the original builder — successive
      * terminal calls (first, count, etc.) all see clean state.
      *
-     * @return array{0: string, 1: array}
+     * @return array{0: string, 1: array<int|string, mixed>}
      */
     public function toSql(): array
     {
@@ -141,9 +141,13 @@ class ModelQuery extends Query
             ->select([\Rxn\Orm\Builder\Raw::of('COUNT(*)')]);
 
         if ($relation->kind === Relation::BELONGS_TO_MANY) {
-            $sub->from($relation->pivotTable)
+            $pivotTable = $relation->pivotTable
+                ?? throw new \LogicException('Internal: belongsToMany relation without pivot table');
+            $parentPivotKey = $relation->parentPivotKey
+                ?? throw new \LogicException('Internal: belongsToMany relation without parentPivotKey');
+            $sub->from($pivotTable)
                 ->where(
-                    $relation->pivotTable . '.' . $relation->parentPivotKey,
+                    $pivotTable . '.' . $parentPivotKey,
                     '=',
                     \Rxn\Orm\Builder\Raw::of($parentTable . '.' . $relation->localKey),
                 );
@@ -375,7 +379,13 @@ class ModelQuery extends Query
         /** @var class-string<Record> $relatedClass */
         $relatedClass = $relation->related;
         $relatedTable = $relatedClass::tableName();
-        $pivotParentRef = $relation->pivotTable . '.' . $relation->parentPivotKey;
+        $pivotTable     = $relation->pivotTable
+            ?? throw new \LogicException('Internal: belongsToMany relation missing pivot table');
+        $parentPivotKey = $relation->parentPivotKey
+            ?? throw new \LogicException('Internal: belongsToMany relation missing parentPivotKey');
+        $relatedPivotKey = $relation->relatedPivotKey
+            ?? throw new \LogicException('Internal: belongsToMany relation missing relatedPivotKey');
+        $pivotParentRef = $pivotTable . '.' . $parentPivotKey;
 
         // Replace the default SELECT * with an explicit list that
         // includes the pivot's parent reference under a synthetic
@@ -388,8 +398,8 @@ class ModelQuery extends Query
             $pivotParentRef => 'rxn_pivot_parent',
         ]);
         $relatedQuery->join(
-            $relation->pivotTable,
-            $relation->pivotTable . '.' . $relation->relatedPivotKey,
+            $pivotTable,
+            $pivotTable . '.' . $relatedPivotKey,
             '=',
             $relatedTable . '.' . $relatedClass::PK,
         );

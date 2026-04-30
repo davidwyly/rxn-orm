@@ -28,7 +28,7 @@ class Query extends Builder implements Buildable
      * SELECT only; ORDER BY/LIMIT/OFFSET apply to the COMBINED
      * result (each leaf gets wrapped in parens at toSql time).
      *
-     * @var array<int, array{kind: string, sql: string, bindings: array}>
+     * @var array<int, array{kind: string, sql: string, bindings: array<int|string, mixed>}>
      */
     private array $unions = [];
 
@@ -38,6 +38,8 @@ class Query extends Builder implements Buildable
      * coming off `Connection::table()` (which seeds `SELECT *`) and
      * matches Eloquent's behavior. To append columns to an existing
      * selection use `addSelect()` or `selectSubquery()`.
+     *
+     * @param array<int|string, string|Raw> $columns
      */
     public function select(array $columns = ['*'], bool $distinct = false): Query
     {
@@ -54,6 +56,8 @@ class Query extends Builder implements Buildable
      * Append columns to the existing SELECT list (additive). Use this
      * when you want to keep prior columns and add more — e.g. when
      * stitching together a query in pieces.
+     *
+     * @param array<int|string, string|Raw> $columns
      */
     public function addSelect(array $columns, bool $distinct = false): Query
     {
@@ -94,7 +98,7 @@ class Query extends Builder implements Buildable
      * @param string|Buildable $table bare identifier, or a nested
      *                                Buildable whose SQL becomes `(subquery) AS alias`.
      */
-    public function from($table, ?string $alias = null): Query
+    public function from(string|Buildable $table, ?string $alias = null): Query
     {
         if ($table instanceof Buildable) {
             if ($alias === null || $alias === '') {
@@ -114,6 +118,9 @@ class Query extends Builder implements Buildable
         return $this;
     }
 
+    /**
+     * @param callable(Join): void $callable
+     */
     public function joinCustom(string $table, callable $callable, ?string $alias = null, string $type = 'inner'): Query
     {
         $join = new Join();
@@ -124,27 +131,27 @@ class Query extends Builder implements Buildable
         return $this;
     }
 
-    public function join(string $table, string $first_operand, string $operator, $second_operand, ?string $alias = null): Query
+    public function join(string $table, string $first_operand, string $operator, string|Raw $second_operand, ?string $alias = null): Query
     {
         return $this->innerJoin($table, $first_operand, $operator, $second_operand, $alias);
     }
 
-    public function innerJoin(string $table, string $first_operand, string $operator, $second_operand, ?string $alias = null): Query
+    public function innerJoin(string $table, string $first_operand, string $operator, string|Raw $second_operand, ?string $alias = null): Query
     {
         return $this->simpleJoin('inner', $table, $first_operand, $operator, $second_operand, $alias);
     }
 
-    public function leftJoin(string $table, string $first_operand, string $operator, $second_operand, ?string $alias = null): Query
+    public function leftJoin(string $table, string $first_operand, string $operator, string|Raw $second_operand, ?string $alias = null): Query
     {
         return $this->simpleJoin('left', $table, $first_operand, $operator, $second_operand, $alias);
     }
 
-    public function rightJoin(string $table, string $first_operand, string $operator, $second_operand, ?string $alias = null): Query
+    public function rightJoin(string $table, string $first_operand, string $operator, string|Raw $second_operand, ?string $alias = null): Query
     {
         return $this->simpleJoin('right', $table, $first_operand, $operator, $second_operand, $alias);
     }
 
-    private function simpleJoin(string $type, string $table, string $first_operand, string $operator, $second_operand, ?string $alias): Query
+    private function simpleJoin(string $type, string $table, string $first_operand, string $operator, string|Raw $second_operand, ?string $alias): Query
     {
         return $this->joinCustom($table, function (Join $join) use ($first_operand, $operator, $second_operand, $alias) {
             if (!empty($alias)) {
@@ -154,15 +161,12 @@ class Query extends Builder implements Buildable
         }, $alias, $type);
     }
 
-    public function whereId($id, string $id_key = 'id'): Query
+    public function whereId(mixed $id, string $id_key = 'id'): Query
     {
         return $this->where($id_key, '=', $id);
     }
 
-    /**
-     * @param string|Raw ...$fields
-     */
-    public function groupBy(...$fields): Query
+    public function groupBy(string|Raw ...$fields): Query
     {
         foreach ($fields as $field) {
             $this->commands['GROUP BY'][] = $this->cleanReference($field);
@@ -176,10 +180,7 @@ class Query extends Builder implements Buildable
         return $this;
     }
 
-    /**
-     * @param string|Raw $field
-     */
-    public function orderBy($field, string $direction = 'ASC'): Query
+    public function orderBy(string|Raw $field, string $direction = 'ASC'): Query
     {
         $direction = strtoupper($direction);
         if ($direction !== 'ASC' && $direction !== 'DESC') {
@@ -267,7 +268,7 @@ class Query extends Builder implements Buildable
      * Materialize the builder state into a single SQL string +
      * positional-bindings array.
      *
-     * @return array{0: string, 1: array}
+     * @return array{0: string, 1: array<int|string, mixed>}
      */
     public function toSql(): array
     {
@@ -289,7 +290,7 @@ class Query extends Builder implements Buildable
      * the end against the combined result. Locks are attached to the
      * combined statement, not the base.
      *
-     * @return array{0: string, 1: array}
+     * @return array{0: string, 1: array<int|string, mixed>}
      */
     private function toSqlWithUnions(): array
     {

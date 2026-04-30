@@ -47,6 +47,7 @@ final class Relation
      * parent record's local-side value.
      *
      * @param array<string, mixed> $parentAttributes
+     * @return ModelQuery<Record>
      */
     public function queryFor(array $parentAttributes): ModelQuery
     {
@@ -61,13 +62,19 @@ final class Relation
         }
         if ($this->kind === self::BELONGS_TO_MANY) {
             $value = $parentAttributes[$this->localKey] ?? null;
+            $pivotTable     = $this->pivotTable
+                ?? throw new \LogicException('Internal: belongsToMany without pivot table');
+            $parentPivotKey = $this->parentPivotKey
+                ?? throw new \LogicException('Internal: belongsToMany without parentPivotKey');
+            $relatedPivotKey = $this->relatedPivotKey
+                ?? throw new \LogicException('Internal: belongsToMany without relatedPivotKey');
             $relatedTable = $relatedClass::tableName();
             $query->join(
-                $this->pivotTable,
-                $this->pivotTable . '.' . $this->relatedPivotKey,
+                $pivotTable,
+                $pivotTable . '.' . $relatedPivotKey,
                 '=',
                 $relatedTable . '.' . $relatedClass::PK,
-            )->where($this->pivotTable . '.' . $this->parentPivotKey, '=', $value);
+            )->where($pivotTable . '.' . $parentPivotKey, '=', $value);
             return $query;
         }
         $value = $parentAttributes[$this->localKey] ?? null;

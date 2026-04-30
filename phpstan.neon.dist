@@ -1,10 +1,5 @@
 parameters:
-    # Level 5 is "all the obvious bugs found." Level 6+ adds strict
-    # nullable-arg checks and generic type-arg requirements that need
-    # a bigger annotation sweep — filed for a v0.4 follow-up. We've
-    # ratcheted from "no static analysis" to "no level-5 findings"
-    # in this pass; bumping further is the right next step.
-    level: 5
+    level: 8
     paths:
         - src
     # Tests use anonymous classes + per-test fixtures that are noisy

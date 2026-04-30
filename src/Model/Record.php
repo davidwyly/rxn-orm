@@ -102,15 +102,26 @@ abstract class Record
     /** @var array<string, mixed> */
     protected array $attributes = [];
 
-    /** Snapshot of attributes as last seen by the DB (for dirty diffing). */
+    /**
+     * Snapshot of attributes as last seen by the DB (for dirty diffing).
+     *
+     * @var array<string, mixed>
+     */
     protected array $original = [];
 
     /** True once the record has been read from / written to the DB. */
     protected bool $exists = false;
 
-    /** Eager-loaded relation results keyed by relation method name. */
+    /**
+     * Eager-loaded relation results keyed by relation method name.
+     *
+     * @var array<string, mixed>
+     */
     protected array $loaded = [];
 
+    /**
+     * @param array<string, mixed> $attributes
+     */
     public function __construct(array $attributes = [])
     {
         if ($attributes !== []) {
@@ -235,6 +246,7 @@ abstract class Record
      * Insert a new row and return the hydrated instance. Subject to
      * the $fillable allowlist when set.
      *
+     * @param array<string, mixed> $attributes
      * @return static
      */
     public static function create(array $attributes): static
@@ -285,6 +297,7 @@ abstract class Record
      * Apply mass-assignable filter then write attributes. Returns
      * $this for chaining.
      */
+    /** @param array<string, mixed> $attributes */
     public function fill(array $attributes): static
     {
         $allowed = static::$fillable;
@@ -700,9 +713,14 @@ abstract class Record
      * @param int|string|array<int, int|string> $ids
      * @param array<string, mixed> $pivotData
      */
+    /**
+     * @param int|string|array<int, int|string> $ids
+     * @param array<string, mixed> $pivotData
+     */
     public function attach(string $relationName, int|string|array $ids, array $pivotData = []): void
     {
         $relation = $this->resolveBelongsToMany($relationName);
+        [$pivotTable, $parentPivotKey, $relatedPivotKey] = self::pivotKeys($relation);
         $ids = is_array($ids) ? $ids : [$ids];
         if ($ids === []) {
             return;
@@ -714,11 +732,11 @@ abstract class Record
         $rows = [];
         foreach ($ids as $id) {
             $rows[] = $pivotData + [
-                $relation->parentPivotKey  => $parentValue,
-                $relation->relatedPivotKey => $id,
+                $parentPivotKey  => $parentValue,
+                $relatedPivotKey => $id,
             ];
         }
-        $insert = (new Insert())->into($relation->pivotTable)->rows($rows);
+        $insert = (new Insert())->into($pivotTable)->rows($rows);
         static::getConnection()->insert($insert);
     }
 
@@ -731,19 +749,20 @@ abstract class Record
     public function detach(string $relationName, int|string|array|null $ids = null): int
     {
         $relation = $this->resolveBelongsToMany($relationName);
+        [$pivotTable, $parentPivotKey, $relatedPivotKey] = self::pivotKeys($relation);
         $parentValue = $this->attributes[$relation->localKey] ?? null;
         if ($parentValue === null) {
             return 0;
         }
         $delete = (new Delete())
-            ->from($relation->pivotTable)
-            ->where($relation->parentPivotKey, '=', $parentValue);
+            ->from($pivotTable)
+            ->where($parentPivotKey, '=', $parentValue);
         if ($ids !== null) {
             $idList = is_array($ids) ? $ids : [$ids];
             if ($idList === []) {
                 return 0;
             }
-            $delete->whereIn($relation->relatedPivotKey, $idList);
+            $delete->whereIn($relatedPivotKey, $idList);
         } else {
             // Detaching all — explicit opt-in needed by Delete builder.
             $delete->allowEmptyWhere(false); // we do have a WHERE
@@ -763,14 +782,15 @@ abstract class Record
     public function sync(string $relationName, array $ids): array
     {
         $relation = $this->resolveBelongsToMany($relationName);
+        [$pivotTable, $parentPivotKey, $relatedPivotKey] = self::pivotKeys($relation);
         $parentValue = $this->attributes[$relation->localKey] ?? null;
         if ($parentValue === null) {
             throw new \LogicException('Cannot sync: parent record has no ' . $relation->localKey);
         }
         $current = static::getConnection()
-            ->table($relation->pivotTable)
-            ->where($relation->parentPivotKey, '=', $parentValue)
-            ->pluck($relation->relatedPivotKey);
+            ->table($pivotTable)
+            ->where($parentPivotKey, '=', $parentValue)
+            ->pluck($relatedPivotKey);
 
         $toAttach = array_values(array_diff($ids, $current));
         $toDetach = array_values(array_diff($current, $ids));
@@ -797,6 +817,24 @@ abstract class Record
             throw new \LogicException($relationName . ' is not a belongsToMany relation');
         }
         return $relation;
+    }
+
+    /**
+     * Narrow Relation's nullable pivot fields once for a relation
+     * already verified as BELONGS_TO_MANY. Returns [pivotTable,
+     * parentPivotKey, relatedPivotKey].
+     *
+     * @return array{0: string, 1: string, 2: string}
+     */
+    private static function pivotKeys(Relation $relation): array
+    {
+        $pt = $relation->pivotTable
+            ?? throw new \LogicException('Internal: belongsToMany relation missing pivot table');
+        $pk = $relation->parentPivotKey
+            ?? throw new \LogicException('Internal: belongsToMany relation missing parentPivotKey');
+        $rk = $relation->relatedPivotKey
+            ?? throw new \LogicException('Internal: belongsToMany relation missing relatedPivotKey');
+        return [$pt, $pk, $rk];
     }
 
     // -- casting -----------------------------------------------------

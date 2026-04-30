@@ -38,6 +38,8 @@ use Rxn\Orm\Builder\Update;
  * for slow-query hunting and structured logging.
  *
  *   $db->onQuery(fn ($sql, $bindings, $ms) => $logger->info($sql, ['ms' => $ms]));
+ *
+ * @phpstan-type Bindings array<int|string, mixed>
  */
 class Connection
 {
@@ -48,7 +50,7 @@ class Connection
 
     private int $transactionDepth = 0;
 
-    /** @var (callable(string, array, float): void)|null */
+    /** @var (callable(string, array<int|string, mixed>, float): void)|null */
     private $queryListener = null;
 
     public function __construct(PDO $pdo, ?PDO $readPdo = null)
@@ -175,6 +177,7 @@ class Connection
     // -- read terminals -----------------------------------------------
 
     /**
+     * @param Bindings $bindings
      * @return array<int, array<string, mixed>>
      */
     public function select(Query|string $sqlOrQuery, array $bindings = []): array
@@ -185,6 +188,7 @@ class Connection
     }
 
     /**
+     * @param Bindings $bindings
      * @return array<string, mixed>|null
      */
     public function selectOne(Query|string $sqlOrQuery, array $bindings = []): ?array
@@ -195,6 +199,7 @@ class Connection
         return $row === false ? null : $row;
     }
 
+    /** @param Bindings $bindings */
     public function value(Query|string $sqlOrQuery, string $column, array $bindings = []): mixed
     {
         $row = $this->selectOne($sqlOrQuery, $bindings);
@@ -205,6 +210,7 @@ class Connection
     }
 
     /**
+     * @param Bindings $bindings
      * @return array<int|string, mixed>
      */
     public function pluck(Query|string $sqlOrQuery, string $column, ?string $key = null, array $bindings = []): array
@@ -288,9 +294,12 @@ class Connection
 
     public function lastInsertId(?string $sequence = null): string
     {
-        return $sequence === null
+        $id = $sequence === null
             ? $this->pdo->lastInsertId()
             : $this->pdo->lastInsertId($sequence);
+        // PDO can return false on drivers that don't support the call;
+        // surface as an empty string so callers don't need to type-juggle.
+        return $id === false ? '' : $id;
     }
 
     // -- raw escape hatch ---------------------------------------------
@@ -300,6 +309,7 @@ class Connection
      * than the typed terminals; useful for DDL or one-off SQL that
      * doesn't need the builder.
      */
+    /** @param Bindings $bindings */
     public function statement(string $sql, array $bindings = []): PDOStatement
     {
         return $this->writeStatement($sql, $bindings);
@@ -309,6 +319,8 @@ class Connection
      * Prepare-and-execute against the READ connection. Used by the
      * Query::cursor() terminal so streaming SELECTs hit the replica
      * (when one is configured) instead of the primary.
+     *
+     * @param Bindings $bindings
      */
     public function selectStatement(string $sql, array $bindings = []): PDOStatement
     {
@@ -384,7 +396,8 @@ class Connection
     // -- helpers ------------------------------------------------------
 
     /**
-     * @return array{0: string, 1: array}
+     * @param Bindings $bindings
+     * @return array{0: string, 1: Bindings}
      */
     private function resolve(Query|string $sqlOrQuery, array $bindings): array
     {
@@ -394,11 +407,13 @@ class Connection
         return [$sqlOrQuery, $bindings];
     }
 
+    /** @param Bindings $bindings */
     private function readStatement(string $sql, array $bindings): PDOStatement
     {
         return $this->execute($this->getReadPdo(), $sql, $bindings);
     }
 
+    /** @param Bindings $bindings */
     private function writeStatement(string $sql, array $bindings): PDOStatement
     {
         return $this->execute($this->pdo, $sql, $bindings);
@@ -416,6 +431,8 @@ class Connection
      * JSON_EXTRACT, COUNT subqueries, etc. SQLite ignores the
      * EMULATE_PREPARES attribute so we can't fix this at the driver
      * level; we have to bind with types ourselves.
+     *
+     * @param Bindings $bindings
      */
     private function execute(PDO $pdo, string $sql, array $bindings): PDOStatement
     {
@@ -434,6 +451,8 @@ class Connection
     /**
      * Bind each value with PDO's matching PARAM_* type. Positional
      * placeholders are 1-indexed; named placeholders use the array key.
+     *
+     * @param Bindings $bindings
      */
     private static function bindTyped(PDOStatement $stmt, array $bindings): void
     {
@@ -445,7 +464,10 @@ class Connection
                 is_bool($value)  => PDO::PARAM_BOOL,
                 default          => PDO::PARAM_STR,
             };
-            $placeholder = $isPositional ? ($key + 1) : $key;
+            // Positional placeholders are 1-indexed; named ones come
+            // through verbatim. The Bindings type allows int|string
+            // keys; the array_is_list() guard tells us which we have.
+            $placeholder = $isPositional ? ((int)$key + 1) : (string)$key;
             $stmt->bindValue($placeholder, $value, $param);
         }
     }

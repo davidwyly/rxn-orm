@@ -2,232 +2,117 @@
 
 namespace Rxn\Orm;
 
-use Rxn\Orm\Builder\QueryParser;
 use Rxn\Orm\Builder\Raw;
 
+/**
+ * Shared scaffolding for SELECT / INSERT / UPDATE / DELETE builders.
+ *
+ * Subclasses (Query, Insert, Update, Delete) accumulate state into
+ * `$commands` and `$bindings` then call `toSql()` to materialize a
+ * `[string $sql, array $bindings]` tuple. The protected helpers here
+ * are the building blocks every builder shares: identifier escaping,
+ * command/binding accumulation, and table-alias tracking.
+ */
 abstract class Builder
 {
     /**
-     * @var array
+     * Per-clause command list. Keyed by SQL keyword
+     * (`SELECT`, `FROM`, `WHERE`, etc.); each value is the ordered
+     * list of fragments that QueryParser stitches into the final SQL.
+     *
+     * Public for trait composition — HasWhere/HasConnection and the
+     * Query subclasses read/write this directly.
+     *
+     * @var array<string, array<int|string, mixed>>
      */
-    public $commands = [];
+    public array $commands = [];
 
     /**
-     * @var array
+     * Positional `?` binding stream, accumulated in emit order.
+     *
+     * @var array<int|string, mixed>
      */
-    public $bindings = [];
+    public array $bindings = [];
 
     /**
-     * @var array
+     * Table → alias map. Populated by `from()` / `join()` so a later
+     * pass could rewrite identifiers; currently not exercised but
+     * cheap to maintain alongside the other state.
+     *
+     * @var array<string, string>
      */
-    public $table_aliases = [];
+    public array $table_aliases = [];
 
     /**
-     * @var string|null
+     * Translate an identifier or Raw expression to its SQL form. Raw
+     * passes through verbatim; strings are filtered for valid chars
+     * then backtick-quoted (Postgres translation happens later, at
+     * Connection level).
+     *
+     * @param string|Raw $reference
      */
-    public $rawSql;
-
-    /**
-     * @param string|Raw $reference Raw instances pass through
-     *                              verbatim; strings are filtered
-     *                              and backtick-escaped.
-     */
-    protected function cleanReference($reference): string
+    protected function cleanReference(string|Raw $reference): string
     {
         if ($reference instanceof Raw) {
             return $reference->sql;
         }
-        $filtered_reference = $this->filterReference((string)$reference);
-        return $this->escapeReference($filtered_reference);
-    }
-
-    protected function cleanValue(string $value): string
-    {
-        return "'$value'";
-    }
-
-    public function changeKey(&$array, $old_key, $new_key)
-    {
-        if (!array_key_exists($old_key, $array)) {
-            return $array;
-        }
-        $keys                                = array_keys($array);
-        $keys[array_search($old_key, $keys)] = $new_key;
-        return array_combine($keys, $array);
+        $filtered = $this->filterReference($reference);
+        return $this->escapeReference($filtered);
     }
 
     /**
-     * @param string $operand
-     *
-     * @return string
+     * Strip whitespace and backticks; keep the first run of valid
+     * identifier characters. Defensive against malformed input —
+     * the operator allowlist + this filter are what keep raw user
+     * strings out of the emitted SQL.
      */
     protected function filterReference(string $operand): string
     {
-        $operand = preg_replace('#[\`\s]#', '', $operand);
+        $operand = (string)preg_replace('#[\`\s]#', '', $operand);
         preg_match('#[\p{L}\_\.\-\`0-9]+#', $operand, $matches);
-        if (isset($matches[0])) {
-            return $matches[0];
-        }
-        return '';
+        return $matches[0] ?? '';
     }
 
     /**
-     * @param string $operand
-     *
-     * @return string
+     * Backtick-quote an identifier, splitting on a single dot for
+     * `table.column` qualified references.
      */
     protected function escapeReference(string $operand): string
     {
-        $exploded_operand = explode('.', $operand);
-        if (count($exploded_operand) === 2) {
-            return "`{$exploded_operand[0]}`.`{$exploded_operand[1]}`";
+        $parts = explode('.', $operand);
+        if (count($parts) === 2) {
+            return "`{$parts[0]}`.`{$parts[1]}`";
         }
         return "`$operand`";
     }
 
-
-    protected function isAssociative(array $array)
-    {
-        if ([] === $array) {
-            return false;
-        }
-        ksort($array);
-        return array_keys($array) !== range(0, count($array) - 1);
-    }
-
-    protected function addCommandWithModifiers($command, $modifiers, $key)
-    {
-        $this->commands[$command][$key] = $modifiers;
-    }
-
-    protected function addCommand($command, $value)
+    /** Append a fragment to the named command bucket. */
+    protected function addCommand(string $command, mixed $value): void
     {
         $this->commands[$command][] = $value;
     }
 
-    protected function loadCommands(Builder $builder)
+    /**
+     * Merge another builder's $commands into ours. Used when a
+     * sub-builder (Select / From / Join) hands its accumulated state
+     * back to the parent Query.
+     */
+    protected function loadCommands(Builder $builder): void
     {
-        $this->commands = array_merge_recursive((array)$this->commands, (array)$builder->commands);
+        $this->commands = array_merge_recursive($this->commands, $builder->commands);
     }
 
-    protected function loadGroupCommands(Builder $builder, $type)
+    /** Append another builder's bindings (in order) to ours. */
+    protected function loadBindings(Builder $builder): void
     {
-        $this->commands[$type][] = $builder->commands;
-    }
-
-    protected function loadBindings(Builder $builder)
-    {
-        $this->bindings = array_merge((array)$this->bindings, (array)$builder->bindings);
-    }
-
-    protected function loadTableAliases(Builder $builder)
-    {
-        $this->table_aliases = array_merge((array)$this->table_aliases, (array)$builder->table_aliases);
-    }
-
-    protected function getCommands()
-    {
-        return $this->commands;
-    }
-
-    protected function addBindings($key_values)
-    {
-        if (empty($key_values)) {
-            return null;
-        }
-        foreach ($key_values as $value) {
-            $this->addBinding($value);
+        foreach ($builder->bindings as $b) {
+            $this->bindings[] = $b;
         }
     }
 
-    protected function addBinding($value)
+    /** Inherit the other builder's table-alias map. */
+    protected function loadTableAliases(Builder $builder): void
     {
-        $this->bindings[] = $value;
+        $this->table_aliases = array_merge($this->table_aliases, $builder->table_aliases);
     }
-
-    protected function getOperandBindings($operand): array
-    {
-        if (is_array($operand)) {
-            $bindings     = [];
-            $parsed_array = [];
-            foreach ($operand as $value) {
-                $parsed_array[] = '?';
-                $bindings[]     = $value;
-            }
-            return ['(' . implode(",", $parsed_array) . ')', $bindings];
-        }
-        return ['?', [$operand]];
-    }
-
-    public function build()
-    {
-        $parser = new QueryParser($this);
-        $this->rawSql = $parser->getSql();
-    }
-
-
-    public function parseCommandAliases()
-    {
-        foreach ($this->commands as $command_type => $command_details) {
-            switch ($command_type) {
-
-                case 'FROM':
-                    // do nothing
-                    break;
-
-                case 'INNER JOIN':
-                case 'LEFT JOIN':
-                case 'RIGHT JOIN':
-                case 'CROSS JOIN':
-                case 'NATURAL JOIN':
-                    $this->parseJoinAliases($command_details, $command_type);
-                    break;
-
-                default:
-                    $this->parseAliases($command_details, $command_type);
-            }
-        }
-    }
-
-    private function parseAliases(array $command_details, $command_type)
-    {
-        foreach ($command_details as $key => $value) {
-            if ($value == '*') {
-                break;
-            }
-            foreach ($this->table_aliases as $table => $alias) {
-                $new_value = str_replace("`$table`", "`$alias`", $value);
-                if ($new_value != $value) {
-                    $this->commands[$command_type][$key] = $new_value;
-                }
-            }
-        }
-    }
-
-    private function parseJoinAliases(array $command_details, $command_type)
-    {
-        foreach ($command_details as $command_table => $table_commands) {
-            foreach ((array)$table_commands['ON'] as $key => $value) {
-                foreach ($this->table_aliases as $table => $alias) {
-                    $new_value = str_replace("`$table`", "`$alias`", $value);
-                    if ($new_value != $value) {
-                        $value                                                     = $new_value;
-                        $this->commands[$command_type][$command_table]['ON'][$key] = $value;
-                    }
-                }
-            }
-            if (isset($table_commands['WHERE'])) {
-                foreach ($table_commands['WHERE'] as $key => $value) {
-                    foreach ($this->table_aliases as $table => $alias) {
-                        $new_value = str_replace("`$table`", "`$alias`", $value);
-                        if ($new_value != $value) {
-                            $value                                                        = $new_value;
-                            $this->commands[$command_type][$command_table]['WHERE'][$key] = $value;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
 }

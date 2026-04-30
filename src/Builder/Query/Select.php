@@ -7,6 +7,9 @@ use Rxn\Orm\Builder\Raw;
 
 class Select extends Query
 {
+    /**
+     * @param array<int|string, string|Raw> $columns
+     */
     public function set(array $columns = ['*'], bool $distinct = false): void
     {
         if ($columns === ['*'] || $columns === []) {
@@ -41,7 +44,10 @@ class Select extends Query
      */
     private function emitNumerical(string $command, string $entry): void
     {
-        $clauses = preg_split('#\s*,\s*#', trim($entry), -1, PREG_SPLIT_NO_EMPTY);
+        // preg_split returns `false` on regex failure; the patterns
+        // here are static and known-good, so coerce to [] for the
+        // type-checker. Same below for the AS-split.
+        $clauses = preg_split('#\s*,\s*#', trim($entry), -1, PREG_SPLIT_NO_EMPTY) ?: [];
         foreach ($clauses as $clause) {
             // `table.*` is the SQL wildcard form; preserve it verbatim
             // since cleanReference would otherwise mangle the `*` into
@@ -51,10 +57,10 @@ class Select extends Query
                 $this->addCommand($command, '`' . trim($table, '`') . '`.*');
                 continue;
             }
-            $splits = preg_split('#\s+[aA][sS]\s+#', $clause);
+            $splits = preg_split('#\s+[aA][sS]\s+#', $clause) ?: [$clause];
             if (count($splits) === 2) {
-                $reference = $this->cleanReference(array_shift($splits));
-                $alias     = $this->cleanReference(array_shift($splits));
+                $reference = $this->cleanReference((string)array_shift($splits));
+                $alias     = $this->cleanReference((string)array_shift($splits));
                 $this->addCommand($command, "$reference AS $alias");
                 continue;
             }

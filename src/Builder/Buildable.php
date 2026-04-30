@@ -10,7 +10,7 @@ namespace Rxn\Orm\Builder;
 interface Buildable
 {
     /**
-     * @return array{0: string, 1: array} [sql, positional bindings]
+     * @return array{0: string, 1: array<int|string, mixed>} [sql, positional bindings]
      */
     public function toSql(): array;
 }

@@ -49,19 +49,20 @@ final class JoinTest extends TestCase
         );
     }
 
-    public function testJoinParsed(): void
+    public function testJoinPopulatesCommandsAndAliases(): void
     {
         $query = (new Query())
             ->select(['users.id' => 'user_id'])
             ->from('users', 'u')
             ->join('orders', 'orders.user_id', '=', 'users.id', 'o');
-        $query->parseCommandAliases();
 
         $this->assertSame(['users' => 'u', 'orders' => 'o'], $query->table_aliases);
-        $this->assertSame('`u`.`id` AS `user_id`', $query->commands['SELECT'][0]);
+        // Identifier escaping happens at emission time; the SELECT
+        // bucket holds the pre-rendered `users.id AS user_id`.
+        $this->assertSame('`users`.`id` AS `user_id`', $query->commands['SELECT'][0]);
         $this->assertSame('`users` AS `u`', $query->commands['FROM'][0]);
         $this->assertSame(
-            ['orders' => ['AS' => ['`o`'], 'ON' => ['`o`.`user_id` = `u`.`id`']]],
+            ['orders' => ['AS' => ['`o`'], 'ON' => ['`orders`.`user_id` = `users`.`id`']]],
             $query->commands['INNER JOIN'],
         );
     }

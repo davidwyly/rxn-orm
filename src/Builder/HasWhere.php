@@ -72,8 +72,8 @@ trait HasWhere
     }
 
     /**
-     * @param array|Buildable $values literal list, or a Buildable
-     *                                subquery the engine evaluates as the IN-list.
+     * @param array<int, mixed>|Buildable $values literal list, or a
+     *                                            Buildable subquery the engine evaluates as the IN-list.
      * @return static
      */
     public function whereIn(string $field, array|Buildable $values, string $type = 'and')
@@ -82,7 +82,7 @@ trait HasWhere
     }
 
     /**
-     * @param array|Buildable $values
+     * @param array<int, mixed>|Buildable $values
      * @return static
      */
     public function whereNotIn(string $field, array|Buildable $values, string $type = 'and')
@@ -90,19 +90,23 @@ trait HasWhere
         return $this->where($field, 'NOT IN', $values, null, $type);
     }
 
-    /** @return static */ public function andWhereIn(string $f, array|Buildable $v)
+    /** @param array<int, mixed>|Buildable $v @return static */
+    public function andWhereIn(string $f, array|Buildable $v): static
     {
         return $this->whereIn($f, $v, 'and');
     }
-    /** @return static */ public function andWhereNotIn(string $f, array|Buildable $v)
+    /** @param array<int, mixed>|Buildable $v @return static */
+    public function andWhereNotIn(string $f, array|Buildable $v): static
     {
         return $this->whereNotIn($f, $v, 'and');
     }
-    /** @return static */ public function orWhereIn(string $f, array|Buildable $v)
+    /** @param array<int, mixed>|Buildable $v @return static */
+    public function orWhereIn(string $f, array|Buildable $v): static
     {
         return $this->whereIn($f, $v, 'or');
     }
-    /** @return static */ public function orWhereNotIn(string $f, array|Buildable $v)
+    /** @param array<int, mixed>|Buildable $v @return static */
+    public function orWhereNotIn(string $f, array|Buildable $v): static
     {
         return $this->whereNotIn($f, $v, 'or');
     }

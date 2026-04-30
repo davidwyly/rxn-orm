@@ -43,7 +43,7 @@ final class Insert extends Builder implements Buildable
     /** Source SELECT for INSERT...SELECT (mutually exclusive with row()/rows()). */
     private ?Buildable $sourceQuery = null;
 
-    /** Target column list for INSERT...SELECT. */
+    /** @var array<int, string> Target column list for INSERT...SELECT. */
     private array $sourceColumns = [];
 
     /** @var string[] */
@@ -225,6 +225,7 @@ final class Insert extends Builder implements Buildable
         return $this;
     }
 
+    /** @return array{0: string, 1: array<int|string, mixed>} */
     public function toSql(): array
     {
         if ($this->table === null) {
@@ -321,7 +322,9 @@ final class Insert extends Builder implements Buildable
         }
         $driver = $this->connection->getDriver();
         return match ($driver) {
-            'mysql', 'mariadb' => preg_replace('/^INSERT INTO/', 'INSERT IGNORE INTO', $sql, 1),
+            // preg_replace can return null on regex failure — coerce to
+            // string since INSERT INTO is always literal here.
+            'mysql', 'mariadb' => (string)preg_replace('/^INSERT INTO/', 'INSERT IGNORE INTO', $sql, 1),
             'pgsql', 'sqlite'  => $sql . ' ON CONFLICT DO NOTHING',
             default            => throw new \LogicException(
                 "ignore() has no portable form for driver '$driver'.",
@@ -335,6 +338,9 @@ final class Insert extends Builder implements Buildable
      *
      * @return array{0: string, 1: array<int, mixed>}
      */
+    /**
+     * @return array{0: string, 1: array<int, mixed>}
+     */
     private function renderUpsert(): array
     {
         if ($this->connection === null) {
@@ -343,11 +349,17 @@ final class Insert extends Builder implements Buildable
                 'Call setConnection($db) before toSql(), or use the MySQL-only onDuplicateKeyUpdate() instead.',
             );
         }
+        // Localise so PHPStan can see it's non-null past the guard
+        // above. (renderUpsert is only invoked from toSql() when
+        // $this->upsert was set.)
+        $config = $this->upsert ?? throw new \LogicException('renderUpsert called without an upsert config');
+        [$uniqueKeys, $updateColumns] = $config;
+
         $driver = $this->connection->getDriver();
         return match ($driver) {
-            'mysql', 'mariadb' => $this->renderUpsertMysql(),
-            'pgsql'            => $this->renderUpsertOnConflict('EXCLUDED'),
-            'sqlite'           => $this->renderUpsertOnConflict('excluded'),
+            'mysql', 'mariadb' => $this->renderUpsertMysql($updateColumns),
+            'pgsql'            => $this->renderUpsertOnConflict($uniqueKeys, $updateColumns, 'EXCLUDED'),
+            'sqlite'           => $this->renderUpsertOnConflict($uniqueKeys, $updateColumns, 'excluded'),
             default            => throw new \LogicException(
                 "upsert() has no portable form for driver '$driver'. " .
                 'Use Insert::onDuplicateKeyUpdate() (MySQL) or build the SQL yourself.',
@@ -356,11 +368,11 @@ final class Insert extends Builder implements Buildable
     }
 
     /**
+     * @param array<int|string, mixed> $updateColumns
      * @return array{0: string, 1: array<int, mixed>}
      */
-    private function renderUpsertMysql(): array
+    private function renderUpsertMysql(array $updateColumns): array
     {
-        [$_uniqueKeys, $updateColumns] = $this->upsert;
         $assignments = [];
         $bindings    = [];
         foreach ($updateColumns as $key => $value) {
@@ -386,11 +398,12 @@ final class Insert extends Builder implements Buildable
      * pseudo-table name differs in case (`EXCLUDED` vs `excluded`)
      * but is otherwise identical.
      *
+     * @param array<int, string> $uniqueKeys
+     * @param array<int|string, mixed> $updateColumns
      * @return array{0: string, 1: array<int, mixed>}
      */
-    private function renderUpsertOnConflict(string $excludedAlias): array
+    private function renderUpsertOnConflict(array $uniqueKeys, array $updateColumns, string $excludedAlias): array
     {
-        [$uniqueKeys, $updateColumns] = $this->upsert;
         $escapedKeys = array_map(fn ($k) => '`' . trim((string)$k, '`') . '`', $uniqueKeys);
 
         $assignments = [];
@@ -420,7 +433,7 @@ final class Insert extends Builder implements Buildable
      * fromQuery() / columns() form. Bindings come from the source
      * SELECT — we don't add any of our own.
      *
-     * @return array{0: string, 1: array<int, mixed>}
+     * @return array{0: string, 1: array<int|string, mixed>}
      */
     private function renderInsertSelect(): array
     {
@@ -429,12 +442,14 @@ final class Insert extends Builder implements Buildable
                 'fromQuery() requires columns() to be set so the target column list is explicit',
             );
         }
+        $source = $this->sourceQuery
+            ?? throw new \LogicException('renderInsertSelect called without a source query');
         $escapedTable   = '`' . trim((string)$this->table, '`') . '`';
         $escapedColumns = array_map(
             fn (string $c) => '`' . trim($c, '`') . '`',
             $this->sourceColumns,
         );
-        [$selectSql, $bindings] = $this->sourceQuery->toSql();
+        [$selectSql, $bindings] = $source->toSql();
 
         $sql = 'INSERT INTO ' . $escapedTable
              . ' (' . implode(', ', $escapedColumns) . ')'
