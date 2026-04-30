@@ -5,9 +5,9 @@ namespace Rxn\Orm\Tests\Model;
 use PDO;
 use Rxn\Orm\Db\Connection;
 use Rxn\Orm\Model\Record;
-use Rxn\Orm\Tests\Support\CountingPdo;
 use Rxn\Orm\Tests\Model\Fixtures\Tag;
 use Rxn\Orm\Tests\Model\Fixtures\TaggedPost;
+use Rxn\Orm\Tests\Support\CountingPdo;
 use Rxn\Orm\Tests\Support\SqliteTestCase;
 
 final class BelongsToManyTest extends SqliteTestCase
@@ -111,7 +111,7 @@ final class BelongsToManyTest extends SqliteTestCase
         $post->attach('tags', 1); // tag 'php' to post 'p3'
 
         $count = (int)$this->pdo->query(
-            "SELECT COUNT(*) FROM post_tag WHERE post_id = 3 AND tag_id = 1"
+            "SELECT COUNT(*) FROM post_tag WHERE post_id = 3 AND tag_id = 1",
         )->fetchColumn();
         $this->assertSame(1, $count);
     }
@@ -132,7 +132,7 @@ final class BelongsToManyTest extends SqliteTestCase
         $post->attach('tags', 1, ['granted_at' => '2025-01-01 12:00:00']);
 
         $row = $this->pdo->query(
-            "SELECT granted_at FROM post_tag WHERE post_id = 3 AND tag_id = 1"
+            "SELECT granted_at FROM post_tag WHERE post_id = 3 AND tag_id = 1",
         )->fetch(PDO::FETCH_ASSOC);
         $this->assertSame('2025-01-01 12:00:00', $row['granted_at']);
     }

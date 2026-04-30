@@ -40,7 +40,7 @@ $baselineMs = bench_time(function () use ($rows) {
     }
     $pdo->commit();
 });
-echo bench_format_row('raw PDO + prepare',  $baselineMs, null) . "\n";
+echo bench_format_row('raw PDO + prepare', $baselineMs, null) . "\n";
 
 // -- rxn-orm Connection (per-row Insert) ------------------------------
 $rxnPerRowMs = bench_time(function () use ($rows) {
@@ -53,7 +53,7 @@ $rxnPerRowMs = bench_time(function () use ($rows) {
         }
     });
 });
-echo bench_format_row('rxn-orm per-row',    $rxnPerRowMs, $baselineMs) . "\n";
+echo bench_format_row('rxn-orm per-row', $rxnPerRowMs, $baselineMs) . "\n";
 
 // -- rxn-orm Connection (single batch Insert) -------------------------
 $rxnBatchMs = bench_time(function () use ($rows) {
@@ -64,10 +64,11 @@ $rxnBatchMs = bench_time(function () use ($rows) {
     }
     $db->insert((new Insert())->into('posts')->rows($batch));
 });
-echo bench_format_row('rxn-orm batch',      $rxnBatchMs, $baselineMs) . "\n";
+echo bench_format_row('rxn-orm batch', $rxnBatchMs, $baselineMs) . "\n";
 
 // -- rxn-orm Record::create (per-row, full lifecycle) -----------------
-class InsertBenchPost extends Record {
+class InsertBenchPost extends Record
+{
     public const TABLE = 'posts';
 }
 Record::clearConnections();
@@ -81,13 +82,13 @@ $rxnRecordMs = bench_time(function () use ($db, $rows) {
         }
     });
 });
-echo bench_format_row('rxn-orm Record',     $rxnRecordMs, $baselineMs) . "\n";
+echo bench_format_row('rxn-orm Record', $rxnRecordMs, $baselineMs) . "\n";
 
 // -- Eloquent ---------------------------------------------------------
 if (bench_has_eloquent()) {
     $capsule = bench_eloquent_capsule(fresh_pdo_for_insert());
 
-    $eloquent = new class extends \Illuminate\Database\Eloquent\Model {
+    $eloquent = new class () extends \Illuminate\Database\Eloquent\Model {
         protected $table = 'posts';
         public $timestamps = false;
         protected $guarded = [];
@@ -101,7 +102,7 @@ if (bench_has_eloquent()) {
             }
         });
     });
-    echo bench_format_row('Eloquent',          $elMs, $baselineMs) . "\n";
+    echo bench_format_row('Eloquent', $elMs, $baselineMs) . "\n";
 } else {
     echo "| Eloquent              | (not installed) |\n";
 }

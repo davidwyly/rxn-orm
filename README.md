@@ -14,6 +14,8 @@ Plus an opt-in **`Rxn\Orm\Migration\Runner`** for raw `.sql` migration files.
 
 ---
 
+> **Deep dive:** see [`docs/COMPARISON.md`](docs/COMPARISON.md) for a researched side-by-side study against Eloquent — performance, syntax, complexity, flexibility, and 13 known ORM-killer query patterns with verdicts.
+
 ## Numbers
 
 Measured on PHP 8.3 against in-memory SQLite (`bench/run.php`, repeatable). The interesting line is **rxn-orm Record vs Eloquent**:
@@ -276,6 +278,34 @@ Built-in: `int`, `float`, `bool`, `string`, `json` / `array`, `datetime`, `date`
 Record::setConnection($readReplica);                       // default for everything
 Record::setConnection($auditDb, AuditLog::class);          // override for one model
 ```
+
+### Query scopes (no magic)
+
+Eloquent has `scopeActive()` magic via `__call`. Our equivalent: just write a **static method on your Record that returns a `ModelQuery`**. Composes the same way, no magic, IDE-completable.
+
+```php
+class Post extends Record {
+    public const TABLE = 'posts';
+
+    public static function published(): ModelQuery {
+        return static::query()->where('published', '=', true);
+    }
+
+    public static function popular(int $minVotes = 100): ModelQuery {
+        return static::query()->where('votes', '>=', $minVotes);
+    }
+
+    public static function byAuthor(int $userId): ModelQuery {
+        return static::query()->where('user_id', '=', $userId);
+    }
+}
+
+// Compose:
+Post::published()->where('user_id', '=', 7)->orderBy('votes', 'DESC')->get();
+Post::popular(500)->with('comments')->get();
+```
+
+This is the entire "scopes" feature. No registration, no `__call`, no Larastan stub needed — just methods.
 
 ---
 

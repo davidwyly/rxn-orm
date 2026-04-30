@@ -29,11 +29,11 @@ final class InsertTest extends TestCase
 
         $this->assertSame(
             'INSERT INTO `users` (`email`, `role`) VALUES (?, ?), (?, ?)',
-            $sql
+            $sql,
         );
         $this->assertSame(
             ['a@example.com', 'admin', 'b@example.com', 'member'],
-            $bindings
+            $bindings,
         );
     }
 

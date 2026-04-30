@@ -107,10 +107,6 @@ class QueryParser
         $parts = [];
         $first = true;
         foreach ($conditions as $entry) {
-            // Back-compat: old code paths might still push a bare string.
-            if (is_string($entry)) {
-                $entry = ['op' => 'AND', 'expr' => $entry];
-            }
             $prefix = $first ? '' : (($entry['op'] ?? 'AND') . ' ');
             $first  = false;
             if (isset($entry['group'])) {

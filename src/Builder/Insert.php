@@ -37,6 +37,9 @@ final class Insert extends Builder implements Buildable
     /** @var array{0: array<int, string>, 1: array<int|string, mixed>}|null portable upsert config: [uniqueKeys, updates] */
     private ?array $upsert = null;
 
+    /** True when insertOrIgnore was requested. */
+    private bool $ignore = false;
+
     /** @var string[] */
     private array $returning = [];
 
@@ -93,7 +96,28 @@ final class Insert extends Builder implements Buildable
         if ($this->on_duplicate !== null) {
             throw new \LogicException('upsert() and onDuplicateKeyUpdate() are mutually exclusive');
         }
+        if ($this->ignore) {
+            throw new \LogicException('upsert() and insertOrIgnore() / ignore() are mutually exclusive');
+        }
         $this->upsert = [array_values($uniqueKeys), $updateColumns];
+        return $this;
+    }
+
+    /**
+     * Skip rows that violate a unique constraint instead of raising
+     * an error. Driver-aware:
+     *   - MySQL:    INSERT IGNORE INTO ...
+     *   - Postgres: INSERT INTO ... ON CONFLICT DO NOTHING
+     *   - SQLite:   INSERT INTO ... ON CONFLICT DO NOTHING
+     *
+     * Mutually exclusive with upsert() and onDuplicateKeyUpdate().
+     */
+    public function ignore(): self
+    {
+        if ($this->upsert !== null || $this->on_duplicate !== null) {
+            throw new \LogicException('ignore() is mutually exclusive with upsert() / onDuplicateKeyUpdate()');
+        }
+        $this->ignore = true;
         return $this;
     }
 
@@ -216,11 +240,38 @@ final class Insert extends Builder implements Buildable
             }
         }
 
+        if ($this->ignore) {
+            $sql = $this->applyIgnore($sql);
+        }
+
         if ($this->returning !== []) {
             $sql .= ' RETURNING ' . implode(', ', $this->returning);
         }
 
         return [$sql, $bindings];
+    }
+
+    /**
+     * Driver-specific handling for the ignore-conflicts request:
+     * MySQL needs `INSERT IGNORE INTO`; Postgres/SQLite append
+     * `ON CONFLICT DO NOTHING`.
+     */
+    private function applyIgnore(string $sql): string
+    {
+        if ($this->connection === null) {
+            throw new \LogicException(
+                'ignore() requires an attached Connection so the right driver syntax can be emitted. ' .
+                'Call setConnection($db) before toSql().',
+            );
+        }
+        $driver = $this->connection->getDriver();
+        return match ($driver) {
+            'mysql', 'mariadb' => preg_replace('/^INSERT INTO/', 'INSERT IGNORE INTO', $sql, 1),
+            'pgsql', 'sqlite'  => $sql . ' ON CONFLICT DO NOTHING',
+            default            => throw new \LogicException(
+                "ignore() has no portable form for driver '$driver'.",
+            ),
+        };
     }
 
     /**
@@ -234,7 +285,7 @@ final class Insert extends Builder implements Buildable
         if ($this->connection === null) {
             throw new \LogicException(
                 'upsert() requires an attached Connection so the right driver syntax can be emitted. ' .
-                'Call setConnection($db) before toSql(), or use the MySQL-only onDuplicateKeyUpdate() instead.'
+                'Call setConnection($db) before toSql(), or use the MySQL-only onDuplicateKeyUpdate() instead.',
             );
         }
         $driver = $this->connection->getDriver();
@@ -244,7 +295,7 @@ final class Insert extends Builder implements Buildable
             'sqlite'           => $this->renderUpsertOnConflict('excluded'),
             default            => throw new \LogicException(
                 "upsert() has no portable form for driver '$driver'. " .
-                'Use Insert::onDuplicateKeyUpdate() (MySQL) or build the SQL yourself.'
+                'Use Insert::onDuplicateKeyUpdate() (MySQL) or build the SQL yourself.',
             ),
         };
     }

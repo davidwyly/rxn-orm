@@ -25,7 +25,9 @@ bench_print_header("Hydrate $rows rows from `posts`");
 $baselineMs = bench_time(function () use ($pdo) {
     $stmt = $pdo->query('SELECT * FROM posts');
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    if (count($rows) === 0) throw new RuntimeException('expected rows');
+    if (count($rows) === 0) {
+        throw new RuntimeException('expected rows');
+    }
 });
 echo bench_format_row('raw PDO (assoc array)', $baselineMs, null, memory_get_peak_usage(true)) . "\n";
 
@@ -33,12 +35,15 @@ echo bench_format_row('raw PDO (assoc array)', $baselineMs, null, memory_get_pea
 $rxnAssocMs = bench_time(function () use ($pdo) {
     $db = new Connection($pdo);
     $rows = $db->table('posts')->get();
-    if (count($rows) === 0) throw new RuntimeException('expected rows');
+    if (count($rows) === 0) {
+        throw new RuntimeException('expected rows');
+    }
 });
-echo bench_format_row('rxn-orm Connection',   $rxnAssocMs, $baselineMs, memory_get_peak_usage(true)) . "\n";
+echo bench_format_row('rxn-orm Connection', $rxnAssocMs, $baselineMs, memory_get_peak_usage(true)) . "\n";
 
 // -- rxn-orm: Record (full hydration) ----------------------------------
-class BenchPost extends Record {
+class BenchPost extends Record
+{
     public const TABLE = 'posts';
     protected static array $casts = ['id' => 'int', 'user_id' => 'int', 'views' => 'int', 'published' => 'bool'];
 }
@@ -47,15 +52,17 @@ Record::setConnection(new Connection($pdo));
 
 $rxnRecordMs = bench_time(function () {
     $models = BenchPost::all();
-    if (count($models) === 0) throw new RuntimeException('expected models');
+    if (count($models) === 0) {
+        throw new RuntimeException('expected models');
+    }
 });
-echo bench_format_row('rxn-orm Record',       $rxnRecordMs, $baselineMs, memory_get_peak_usage(true)) . "\n";
+echo bench_format_row('rxn-orm Record', $rxnRecordMs, $baselineMs, memory_get_peak_usage(true)) . "\n";
 
 // -- Eloquent --------------------------------------------------------
 if (bench_has_eloquent()) {
     $capsule = bench_eloquent_capsule($pdo);
 
-    $eloquent = new class extends \Illuminate\Database\Eloquent\Model {
+    $eloquent = new class () extends \Illuminate\Database\Eloquent\Model {
         protected $table = 'posts';
         public $timestamps = false;
         protected $casts = ['id' => 'int', 'user_id' => 'int', 'views' => 'int', 'published' => 'bool'];
@@ -65,9 +72,11 @@ if (bench_has_eloquent()) {
 
     $eloquentMs = bench_time(function () use ($cls) {
         $models = $cls::all();
-        if (count($models) === 0) throw new RuntimeException('expected models');
+        if (count($models) === 0) {
+            throw new RuntimeException('expected models');
+        }
     });
-    echo bench_format_row('Eloquent',           $eloquentMs, $baselineMs, memory_get_peak_usage(true)) . "\n";
+    echo bench_format_row('Eloquent', $eloquentMs, $baselineMs, memory_get_peak_usage(true)) . "\n";
 } else {
     echo "| Eloquent              | (not installed — composer require illuminate/database) |\n";
 }

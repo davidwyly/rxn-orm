@@ -38,7 +38,7 @@ final class ConnectionTest extends SqliteTestCase
     public function testInsertReturnsAffectedCountAndLastInsertId(): void
     {
         $affected = $this->db->run(
-            (new Insert())->into('users')->row(['email' => 'd@x', 'active' => 1])
+            (new Insert())->into('users')->row(['email' => 'd@x', 'active' => 1]),
         );
         $this->assertSame(1, $affected);
         $this->assertSame('4', $this->db->lastInsertId());
@@ -47,7 +47,7 @@ final class ConnectionTest extends SqliteTestCase
     public function testUpdateReturnsAffectedCount(): void
     {
         $affected = $this->db->run(
-            (new Update())->table('users')->set(['active' => 0])->where('email', '=', 'a@x')
+            (new Update())->table('users')->set(['active' => 0])->where('email', '=', 'a@x'),
         );
         $this->assertSame(1, $affected);
     }
@@ -55,7 +55,7 @@ final class ConnectionTest extends SqliteTestCase
     public function testDeleteReturnsAffectedCount(): void
     {
         $affected = $this->db->run(
-            (new Delete())->from('users')->where('active', '=', 0)
+            (new Delete())->from('users')->where('active', '=', 0),
         );
         $this->assertSame(1, $affected);
     }

@@ -27,6 +27,9 @@ class ModelQuery extends Query
     /** @var string[] dotted relation paths queued for eager load */
     private array $eagerLoads = [];
 
+    /** @var string[] relation names queued for withCount */
+    private array $withCounts = [];
+
     /**
      * Soft-delete visibility:
      *   'default' — auto-WHERE deleted_at IS NULL (when model has DELETED_AT)
@@ -62,27 +65,105 @@ class ModelQuery extends Query
     }
 
     /**
-     * Override toSql() to apply the soft-delete scope. Implemented as
-     * a clone-and-delegate so the parent's WHERE rendering doesn't
-     * need to know about soft deletes — they're just an extra
-     * predicate stitched in at emit time.
+     * Add `(SELECT COUNT(*) FROM related WHERE related.fk = parent.pk)
+     * AS relationName_count` to the SELECT for each named relation.
+     * The hydrated record exposes `$user->posts_count` as an attribute
+     * — no extra query at access time.
+     *
+     * Supported on hasMany / hasOne / belongsToMany. belongsTo doesn't
+     * make sense (parent has at most one target).
+     */
+    public function withCount(string ...$relations): static
+    {
+        foreach ($relations as $r) {
+            if ($r !== '' && !in_array($r, $this->withCounts, true)) {
+                $this->withCounts[] = $r;
+            }
+        }
+        return $this;
+    }
+
+    /**
+     * Override toSql() to apply the soft-delete scope and any
+     * withCount() injections. Implemented as a clone-and-delegate so
+     * mutations don't leak into the original builder — successive
+     * terminal calls (first, count, etc.) all see clean state.
      *
      * @return array{0: string, 1: array}
      */
     public function toSql(): array
     {
-        $col = $this->modelClass::DELETED_AT;
-        if ($col === null || $this->softDeleteScope === 'with') {
+        $col          = $this->modelClass::DELETED_AT;
+        $needsScope   = $col !== null && $this->softDeleteScope !== 'with';
+        $needsCounts  = $this->withCounts !== [];
+
+        if (!$needsScope && !$needsCounts) {
             return parent::toSql();
         }
+
         $clone = clone $this;
-        $clone->softDeleteScope = 'with'; // prevent infinite recursion
-        if ($this->softDeleteScope === 'only') {
-            $clone->whereIsNotNull($col);
-        } else {
-            $clone->whereIsNull($col);
+        if ($needsScope) {
+            $clone->softDeleteScope = 'with';
+            if ($this->softDeleteScope === 'only') {
+                $clone->whereIsNotNull($col);
+            } else {
+                $clone->whereIsNull($col);
+            }
+        }
+        if ($needsCounts) {
+            $clone->withCounts = []; // prevent re-injection on the recursive call
+            foreach ($this->withCounts as $name) {
+                $clone->injectWithCount($name);
+            }
         }
         return $clone->toSql();
+    }
+
+    /**
+     * Build a correlated COUNT subquery for $relationName and append
+     * it to the SELECT under the alias `relationName_count`.
+     */
+    private function injectWithCount(string $relationName): void
+    {
+        $sample = new ($this->modelClass)();
+        if (!method_exists($sample, $relationName)) {
+            throw new \LogicException(
+                "withCount: relation $relationName is not defined on " . $this->modelClass,
+            );
+        }
+        $relation = $sample->$relationName();
+        if (!$relation instanceof Relation) {
+            throw new \LogicException("withCount: $relationName() must return a Relation");
+        }
+
+        $parentTable = $this->modelClass::tableName();
+        $sub = (new \Rxn\Orm\Builder\Query())
+            ->select([\Rxn\Orm\Builder\Raw::of('COUNT(*)')]);
+
+        if ($relation->kind === Relation::BELONGS_TO_MANY) {
+            $sub->from($relation->pivotTable)
+                ->where(
+                    $relation->pivotTable . '.' . $relation->parentPivotKey,
+                    '=',
+                    \Rxn\Orm\Builder\Raw::of($parentTable . '.' . $relation->localKey),
+                );
+        } elseif ($relation->kind === Relation::HAS_MANY || $relation->kind === Relation::HAS_ONE) {
+            /** @var class-string<Record> $relatedClass */
+            $relatedClass = $relation->related;
+            $sub->from($relatedClass::tableName())
+                ->where(
+                    $relatedClass::tableName() . '.' . $relation->foreignKey,
+                    '=',
+                    \Rxn\Orm\Builder\Raw::of($parentTable . '.' . $relation->localKey),
+                );
+        } else {
+            throw new \LogicException(
+                "withCount: kind {$relation->kind} is not countable. " .
+                'Use hasMany, hasOne, or belongsToMany.',
+            );
+        }
+
+        $this->selectSubquery($sub, $relationName . '_count');
     }
 
     /**
@@ -178,14 +259,14 @@ class ModelQuery extends Query
         $sample = $parents[0];
         if (!method_exists($sample, $relationName)) {
             throw new \LogicException(
-                'Relation ' . $relationName . ' is not defined on ' . get_class($sample)
+                'Relation ' . $relationName . ' is not defined on ' . get_class($sample),
             );
         }
         $relation = $sample->$relationName();
         if (!$relation instanceof Relation) {
             throw new \LogicException(
                 $relationName . '() must return a ' . Relation::class . ' instance, got '
-                . (is_object($relation) ? get_class($relation) : gettype($relation))
+                . (is_object($relation) ? get_class($relation) : gettype($relation)),
             );
         }
 
@@ -296,12 +377,12 @@ class ModelQuery extends Query
         $relatedTable = $relatedClass::tableName();
         $pivotParentRef = $relation->pivotTable . '.' . $relation->parentPivotKey;
 
-        // Record::query() pre-populates SELECT * — replace it with an
-        // explicit list that includes the pivot's parent reference
-        // under a synthetic alias so we can group results without an
-        // extra round-trip.
+        // Replace the default SELECT * with an explicit list that
+        // includes the pivot's parent reference under a synthetic
+        // alias so we can group results without an extra round-trip.
+        // (select() with explicit columns replaces; that's the
+        // difference vs addSelect() which appends.)
         $relatedQuery = $relatedClass::query();
-        unset($relatedQuery->commands['SELECT'], $relatedQuery->commands['SELECT DISTINCT']);
         $relatedQuery->select([
             $relatedTable . '.*',
             $pivotParentRef => 'rxn_pivot_parent',

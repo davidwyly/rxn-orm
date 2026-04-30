@@ -21,7 +21,7 @@ final class UpsertReturningTest extends TestCase
         $this->assertSame(
             'INSERT INTO `users` (`email`, `visits`) VALUES (?, ?) '
             . 'ON DUPLICATE KEY UPDATE `visits` = visits + 1',
-            $sql
+            $sql,
         );
         $this->assertSame(['a@example.com', 1], $bindings);
     }
@@ -37,7 +37,7 @@ final class UpsertReturningTest extends TestCase
         $this->assertSame(
             'INSERT INTO `users` (`email`, `role`) VALUES (?, ?) '
             . 'ON DUPLICATE KEY UPDATE `role` = ?, `updated_at` = NOW()',
-            $sql
+            $sql,
         );
         $this->assertSame(['a@example.com', 'member', 'admin'], $bindings);
     }
@@ -61,7 +61,7 @@ final class UpsertReturningTest extends TestCase
 
         $this->assertSame(
             'INSERT INTO `users` (`email`) VALUES (?) RETURNING `id`, `email`',
-            $sql
+            $sql,
         );
     }
 
@@ -75,7 +75,7 @@ final class UpsertReturningTest extends TestCase
 
         $this->assertSame(
             "INSERT INTO `users` (`email`) VALUES (?) RETURNING id, COALESCE(role, 'member') AS role",
-            $sql
+            $sql,
         );
     }
 
@@ -90,7 +90,7 @@ final class UpsertReturningTest extends TestCase
 
         $this->assertSame(
             'UPDATE `users` SET `active` = ? WHERE `id` = ? RETURNING `id`, `active`',
-            $sql
+            $sql,
         );
         $this->assertSame([0, 42], $bindings);
     }
@@ -105,7 +105,7 @@ final class UpsertReturningTest extends TestCase
 
         $this->assertSame(
             'DELETE FROM `users` WHERE `id` = ? RETURNING `id`, `email`',
-            $sql
+            $sql,
         );
         $this->assertSame([42], $bindings);
     }

@@ -120,7 +120,7 @@ final class RecordTest extends SqliteTestCase
 
     public function testFillRespectsFillableAllowlist(): void
     {
-        $cls = new class extends \Rxn\Orm\Tests\Model\Fixtures\User {
+        $cls = new class () extends \Rxn\Orm\Tests\Model\Fixtures\User {
             public const TABLE = 'users';
             protected static ?array $fillable = ['email'];
         };

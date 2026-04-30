@@ -6,7 +6,7 @@ use Rxn\Orm\Builder;
 
 class Join extends Builder
 {
-    const JOIN_COMMANDS = [
+    public const JOIN_COMMANDS = [
         'inner' => 'INNER JOIN',
         'left'  => 'LEFT JOIN',
         'right' => 'RIGHT JOIN',
@@ -27,7 +27,8 @@ class Join extends Builder
      */
     public $modifiers = [];
 
-    public function set(string $table, callable $callable, ?string $alias = null, string $type = 'inner') {
+    public function set(string $table, callable $callable, ?string $alias = null, string $type = 'inner')
+    {
         if (!array_key_exists($type, self::JOIN_COMMANDS)) {
             throw new \Exception("");
         }
@@ -42,7 +43,8 @@ class Join extends Builder
 
 
 
-    public function as(string $alias) {
+    public function as(string $alias)
+    {
         $this->alias = $alias;
         $clean_alias = $this->cleanReference($alias);
         if (!in_array($clean_alias, (array)($this->modifiers['AS'] ?? []))) {
@@ -52,7 +54,8 @@ class Join extends Builder
         return $this;
     }
 
-    public function on(string $first, string $condition, $second) {
+    public function on(string $first, string $condition, $second)
+    {
         $first = $this->cleanReference($first);
         $second = $this->cleanReference($second);
         $value = "$first $condition $second";
@@ -60,7 +63,8 @@ class Join extends Builder
         return $this;
     }
 
-    private function addAlias($alias) {
+    private function addAlias($alias)
+    {
         if (!empty($alias)) {
             $this->as($alias);
         }

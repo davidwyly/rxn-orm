@@ -80,6 +80,15 @@ final class ReadWriteSplitTest extends TestCase
         $this->assertSame($singlePdo, $db->getReadPdo());
     }
 
+    public function testCursorRoutesToReadReplica(): void
+    {
+        $titles = [];
+        foreach ($this->db->table('t')->cursor() as $row) {
+            $titles[] = $row['label'];
+        }
+        $this->assertSame(['read-side'], $titles);
+    }
+
     public function testGetReadPdoReturnsPrimaryDuringTransaction(): void
     {
         $this->assertSame($this->readPdo, $this->db->getReadPdo());

@@ -97,16 +97,23 @@ jobs:
           RXN_ORM_PGSQL_PASS: postgres
         run: vendor/bin/phpunit --colors=always
 
-  # Static analysis (lint + composer validate). Cheap, runs in parallel.
+  # Static analysis: lint + composer validate + PHPStan. Cheap; parallel.
   static:
-    name: lint
+    name: lint + phpstan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
+          extensions: pdo, pdo_sqlite
           coverage: none
       - run: composer validate --strict
       - name: PHP syntax check
         run: find src tests bench -name '*.php' -print0 | xargs -0 -n1 -P4 php -l > /dev/null
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+      - name: PHPStan
+        run: vendor/bin/phpstan analyse --no-progress --error-format=github
+      - name: PHP-CS-Fixer (dry-run)
+        run: vendor/bin/php-cs-fixer fix --dry-run --diff --no-interaction

@@ -32,7 +32,9 @@ final class QueryListenerTest extends SqliteTestCase
     public function testListenerFiresForWrites(): void
     {
         $events = [];
-        $this->db->onQuery(function ($sql) use (&$events) { $events[] = $sql; });
+        $this->db->onQuery(function ($sql) use (&$events) {
+            $events[] = $sql;
+        });
 
         $this->db->run((new \Rxn\Orm\Builder\Insert())->into('t')->row(['n' => 4]));
         $this->db->run((new \Rxn\Orm\Builder\Update())->table('t')->set(['n' => 5])->where('id', '=', 1));
@@ -47,7 +49,9 @@ final class QueryListenerTest extends SqliteTestCase
     public function testListenerCanBeRemoved(): void
     {
         $count = 0;
-        $this->db->onQuery(function () use (&$count) { $count++; });
+        $this->db->onQuery(function () use (&$count) {
+            $count++;
+        });
         $this->db->table('t')->get();
         $this->assertSame(1, $count);
 

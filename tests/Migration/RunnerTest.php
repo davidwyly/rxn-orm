@@ -35,7 +35,7 @@ final class RunnerTest extends SqliteTestCase
         $results = $this->runner->run();
         $this->assertSame(
             ['0001_create_widgets' => 'applied', '0002_add_widgets_color' => 'applied', '0003_no_down' => 'applied'],
-            $results
+            $results,
         );
 
         // Side-effect: the widgets table now exists with the color column

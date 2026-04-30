@@ -53,12 +53,36 @@ class Connection
 
     public function __construct(PDO $pdo, ?PDO $readPdo = null)
     {
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $this->configurePdo($pdo);
         if ($readPdo !== null) {
-            $readPdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+            $this->configurePdo($readPdo);
         }
         $this->pdo     = $pdo;
         $this->readPdo = $readPdo;
+    }
+
+    /**
+     * Apply our PDO defaults: throw on errors (always) and prefer
+     * native prepared statements over PHP-side emulation. The emulation
+     * default is a footgun — it stringifies every bound value, which
+     * silently breaks comparisons against integer window-function
+     * results, JSON_EXTRACT outputs, and the like. Native prepares
+     * preserve types end-to-end.
+     *
+     * Drivers that don't support native prepares (rare, legacy MySQL
+     * configurations) will swallow the attempt silently. If you really
+     * need emulated prepares, set the attribute *after* constructing
+     * the Connection.
+     */
+    private function configurePdo(PDO $pdo): void
+    {
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        try {
+            $pdo->setAttribute(PDO::ATTR_EMULATE_PREPARES, false);
+        } catch (\PDOException) {
+            // Driver doesn't support the attribute — leave whatever the
+            // user already set in place.
+        }
     }
 
     public function getPdo(): PDO
@@ -157,8 +181,7 @@ class Connection
     {
         [$sql, $bindings] = $this->resolve($sqlOrQuery, $bindings);
         $stmt = $this->readStatement($sql, $bindings);
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        return $rows === false ? [] : $rows;
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
     /**
@@ -232,8 +255,7 @@ class Connection
         [$sql, $bindings] = $insert->toSql();
         $stmt = $this->writeStatement($sql, $bindings);
         if ($insert->hasReturning()) {
-            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            return $rows === false ? [] : $rows;
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
         }
         return $stmt->rowCount();
     }
@@ -246,8 +268,7 @@ class Connection
         [$sql, $bindings] = $update->toSql();
         $stmt = $this->writeStatement($sql, $bindings);
         if ($update->hasReturning()) {
-            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            return $rows === false ? [] : $rows;
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
         }
         return $stmt->rowCount();
     }
@@ -260,8 +281,7 @@ class Connection
         [$sql, $bindings] = $delete->toSql();
         $stmt = $this->writeStatement($sql, $bindings);
         if ($delete->hasReturning()) {
-            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            return $rows === false ? [] : $rows;
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
         }
         return $stmt->rowCount();
     }
@@ -283,6 +303,16 @@ class Connection
     public function statement(string $sql, array $bindings = []): PDOStatement
     {
         return $this->writeStatement($sql, $bindings);
+    }
+
+    /**
+     * Prepare-and-execute against the READ connection. Used by the
+     * Query::cursor() terminal so streaming SELECTs hit the replica
+     * (when one is configured) instead of the primary.
+     */
+    public function selectStatement(string $sql, array $bindings = []): PDOStatement
+    {
+        return $this->readStatement($sql, $bindings);
     }
 
     // -- transactions -------------------------------------------------
@@ -377,21 +407,67 @@ class Connection
     /**
      * Single chokepoint for prepare+execute. Fires the onQuery hook
      * (if registered) with elapsed wall-clock time. The hook receives
-     * the *original* SQL and bindings, before PDO emulation rewrites
-     * placeholders, which is what humans want to see in logs.
+     * the *translated* SQL the driver actually saw, so logs match
+     * what would land in the database's slow-query log.
+     *
+     * Binds with type-correct PDO::PARAM_* — without this, PDO's
+     * emulated-prepares default stringifies every value, which silently
+     * breaks comparisons against integer outputs from window functions,
+     * JSON_EXTRACT, COUNT subqueries, etc. SQLite ignores the
+     * EMULATE_PREPARES attribute so we can't fix this at the driver
+     * level; we have to bind with types ourselves.
      */
     private function execute(PDO $pdo, string $sql, array $bindings): PDOStatement
     {
+        $sql  = $this->applyQuoting($sql);
         $stmt = $pdo->prepare($sql);
-        if ($this->queryListener === null) {
-            $stmt->execute($bindings);
-            return $stmt;
+        $start = $this->queryListener !== null ? hrtime(true) : 0;
+        self::bindTyped($stmt, $bindings);
+        $stmt->execute();
+        if ($this->queryListener !== null) {
+            $durationMs = (hrtime(true) - $start) / 1_000_000;
+            ($this->queryListener)($sql, $bindings, $durationMs);
         }
-        $start = hrtime(true);
-        $stmt->execute($bindings);
-        $durationMs = (hrtime(true) - $start) / 1_000_000;
-        ($this->queryListener)($sql, $bindings, $durationMs);
         return $stmt;
+    }
+
+    /**
+     * Bind each value with PDO's matching PARAM_* type. Positional
+     * placeholders are 1-indexed; named placeholders use the array key.
+     */
+    private static function bindTyped(PDOStatement $stmt, array $bindings): void
+    {
+        $isPositional = array_is_list($bindings);
+        foreach ($bindings as $key => $value) {
+            $param = match (true) {
+                $value === null  => PDO::PARAM_NULL,
+                is_int($value)   => PDO::PARAM_INT,
+                is_bool($value)  => PDO::PARAM_BOOL,
+                default          => PDO::PARAM_STR,
+            };
+            $placeholder = $isPositional ? ($key + 1) : $key;
+            $stmt->bindValue($placeholder, $value, $param);
+        }
+    }
+
+    /**
+     * Translate the builder's MySQL-style backtick identifiers to the
+     * driver's preferred quoting. Postgres requires double quotes;
+     * MySQL/SQLite accept backticks natively. Public so callers using
+     * `$builder->toSql()` directly (without going through Connection
+     * terminals) can do the swap themselves.
+     *
+     * Safe assumption: the builder never emits backticks inside string
+     * literals — string values are bound as `?` placeholders, never
+     * embedded. Raw::of(...) expressions could theoretically contain
+     * backticks, but standard SQL never does.
+     */
+    public function applyQuoting(string $sql): string
+    {
+        if ($this->getDriver() !== 'pgsql') {
+            return $sql;
+        }
+        return str_replace('`', '"', $sql);
     }
 
     private static function quoteIdent(string $ident): string

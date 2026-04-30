@@ -25,9 +25,9 @@ final class Relation
      * @param self::HAS_MANY|self::HAS_ONE|self::BELONGS_TO|self::BELONGS_TO_MANY $kind
      * @param class-string<Record> $parent
      * @param class-string<Record> $related
-     * @param string|null $pivotTable        for BELONGS_TO_MANY: the pivot table name
-     * @param string|null $parentPivotKey    for BELONGS_TO_MANY: pivot column referencing parent (e.g. 'user_id')
-     * @param string|null $relatedPivotKey   for BELONGS_TO_MANY: pivot column referencing related (e.g. 'role_id')
+     * @param string|null $pivotTable for BELONGS_TO_MANY: the pivot table name
+     * @param string|null $parentPivotKey for BELONGS_TO_MANY: pivot column referencing parent (e.g. 'user_id')
+     * @param string|null $relatedPivotKey for BELONGS_TO_MANY: pivot column referencing related (e.g. 'role_id')
      */
     public function __construct(
         public readonly string $kind,
@@ -38,7 +38,8 @@ final class Relation
         public readonly ?string $pivotTable = null,
         public readonly ?string $parentPivotKey = null,
         public readonly ?string $relatedPivotKey = null,
-    ) {}
+    ) {
+    }
 
     /**
      * For lazy access (`$user->orders()->queryFor($user)->get()`):

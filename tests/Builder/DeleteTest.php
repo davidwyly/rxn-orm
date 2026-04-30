@@ -29,7 +29,7 @@ final class DeleteTest extends TestCase
 
         $this->assertSame(
             'DELETE FROM `sessions` WHERE `expires_at` < ? OR `user_id` IS NULL',
-            $sql
+            $sql,
         );
         $this->assertSame(['2025-01-01'], $bindings);
     }
@@ -46,7 +46,7 @@ final class DeleteTest extends TestCase
 
         $this->assertSame(
             'DELETE FROM `users` WHERE `active` = ? AND (`role` = ? OR `role` IN (?, ?))',
-            $sql
+            $sql,
         );
         $this->assertSame([0, 'guest', 'banned', 'deleted'], $bindings);
     }

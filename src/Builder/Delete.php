@@ -86,7 +86,7 @@ final class Delete extends Builder implements Buildable
         $hasWhere = !empty($this->commands['WHERE']);
         if (!$hasWhere && !$this->allow_empty_where) {
             throw new \LogicException(
-                'Delete with no WHERE clause is blocked; call allowEmptyWhere() to opt in'
+                'Delete with no WHERE clause is blocked; call allowEmptyWhere() to opt in',
             );
         }
 

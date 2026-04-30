@@ -71,22 +71,41 @@ trait HasWhere
         return $this->orWhere($field, $operator, $value, $callback);
     }
 
-    /** @return static */
-    public function whereIn(string $field, array $values, string $type = 'and')
+    /**
+     * @param array|Buildable $values literal list, or a Buildable
+     *                                subquery the engine evaluates as the IN-list.
+     * @return static
+     */
+    public function whereIn(string $field, array|Buildable $values, string $type = 'and')
     {
         return $this->where($field, 'IN', $values, null, $type);
     }
 
-    /** @return static */
-    public function whereNotIn(string $field, array $values, string $type = 'and')
+    /**
+     * @param array|Buildable $values
+     * @return static
+     */
+    public function whereNotIn(string $field, array|Buildable $values, string $type = 'and')
     {
         return $this->where($field, 'NOT IN', $values, null, $type);
     }
 
-    /** @return static */ public function andWhereIn(string $f, array $v)     { return $this->whereIn($f, $v, 'and'); }
-    /** @return static */ public function andWhereNotIn(string $f, array $v)  { return $this->whereNotIn($f, $v, 'and'); }
-    /** @return static */ public function orWhereIn(string $f, array $v)      { return $this->whereIn($f, $v, 'or'); }
-    /** @return static */ public function orWhereNotIn(string $f, array $v)   { return $this->whereNotIn($f, $v, 'or'); }
+    /** @return static */ public function andWhereIn(string $f, array|Buildable $v)
+    {
+        return $this->whereIn($f, $v, 'and');
+    }
+    /** @return static */ public function andWhereNotIn(string $f, array|Buildable $v)
+    {
+        return $this->whereNotIn($f, $v, 'and');
+    }
+    /** @return static */ public function orWhereIn(string $f, array|Buildable $v)
+    {
+        return $this->whereIn($f, $v, 'or');
+    }
+    /** @return static */ public function orWhereNotIn(string $f, array|Buildable $v)
+    {
+        return $this->whereNotIn($f, $v, 'or');
+    }
 
     /** @return static */
     public function whereIsNull(string $field, string $type = 'and')
@@ -102,10 +121,110 @@ trait HasWhere
         return $this;
     }
 
-    /** @return static */ public function andWhereIsNull(string $f)     { return $this->whereIsNull($f, 'and'); }
-    /** @return static */ public function andWhereIsNotNull(string $f)  { return $this->whereIsNotNull($f, 'and'); }
-    /** @return static */ public function orWhereIsNull(string $f)      { return $this->whereIsNull($f, 'or'); }
-    /** @return static */ public function orWhereIsNotNull(string $f)   { return $this->whereIsNotNull($f, 'or'); }
+    /** @return static */ public function andWhereIsNull(string $f)
+    {
+        return $this->whereIsNull($f, 'and');
+    }
+    /** @return static */ public function andWhereIsNotNull(string $f)
+    {
+        return $this->whereIsNotNull($f, 'and');
+    }
+    /** @return static */ public function orWhereIsNull(string $f)
+    {
+        return $this->whereIsNull($f, 'or');
+    }
+    /** @return static */ public function orWhereIsNotNull(string $f)
+    {
+        return $this->whereIsNotNull($f, 'or');
+    }
+
+    /**
+     * Append `EXISTS (subquery)`. Useful for correlated subqueries
+     * where you want to filter parent rows by the existence of any
+     * matching child row, without joining and de-duplicating.
+     *
+     *   $q->where('u.active', '=', 1)->whereExists(
+     *       (new Query())->select([Raw::of('1')])
+     *           ->from('orders', 'o')
+     *           ->where('o.user_id', '=', Raw::of('u.id'))
+     *   );
+     *
+     * @return static
+     */
+    public function whereExists(Buildable $subquery, string $type = 'and')
+    {
+        return $this->appendExists($subquery, false, $type);
+    }
+
+    /** @return static */
+    public function whereNotExists(Buildable $subquery, string $type = 'and')
+    {
+        return $this->appendExists($subquery, true, $type);
+    }
+
+    /** @return static */ public function andWhereExists(Buildable $sub)
+    {
+        return $this->whereExists($sub, 'and');
+    }
+    /** @return static */ public function andWhereNotExists(Buildable $sub)
+    {
+        return $this->whereNotExists($sub, 'and');
+    }
+    /** @return static */ public function orWhereExists(Buildable $sub)
+    {
+        return $this->whereExists($sub, 'or');
+    }
+    /** @return static */ public function orWhereNotExists(Buildable $sub)
+    {
+        return $this->whereNotExists($sub, 'or');
+    }
+
+    /**
+     * Compare just the date portion of a column. Emits
+     * `DATE(field) op ?`, which is portable across MySQL, Postgres,
+     * and SQLite — all three implement DATE() identically.
+     *
+     * (whereYear / whereMonth aren't shipped because their portable
+     * forms diverge: MySQL uses YEAR(), Postgres uses EXTRACT(YEAR ...),
+     * SQLite uses STRFTIME. Use Raw::of(...) for those cases.)
+     *
+     * @return static
+     */
+    public function whereDate(string $field, string $operator, mixed $value, string $type = 'and')
+    {
+        $this->assertWhereOperator($operator);
+        $expr = 'DATE(' . $this->cleanReference($field) . ') ' . strtoupper($operator) . ' ?';
+        $this->bindings[] = $value;
+        $this->commands['WHERE'][] = [
+            'op'   => $this->normalizeOp($type),
+            'expr' => $expr,
+        ];
+        return $this;
+    }
+
+    /** @return static */ public function andWhereDate(string $f, string $op, mixed $v)
+    {
+        return $this->whereDate($f, $op, $v, 'and');
+    }
+    /** @return static */ public function orWhereDate(string $f, string $op, mixed $v)
+    {
+        return $this->whereDate($f, $op, $v, 'or');
+    }
+
+    /** @return static */
+    private function appendExists(Buildable $subquery, bool $negate, string $type)
+    {
+        [$sub_sql, $sub_bindings] = $subquery->toSql();
+        foreach ($sub_bindings as $b) {
+            $this->bindings[] = $b;
+        }
+        $keyword = $negate ? 'NOT EXISTS' : 'EXISTS';
+        $this->commands['WHERE'][] = [
+            'op'   => $this->normalizeOp($type),
+            'expr' => $keyword . ' (' . $sub_sql . ')',
+        ];
+        return $this;
+    }
 
     private function assertWhereOperator(string $operator): void
     {
@@ -127,7 +246,7 @@ trait HasWhere
     private function buildCondition(string $field, string $operator, $value): string
     {
         $operator = strtoupper($operator);
-        $field    = $this->cleanReference($field);
+        $field    = $this->resolveJsonField($field);
         if ($operator === 'IN' || $operator === 'NOT IN') {
             // Subquery form: WHERE col IN (SELECT ...)
             if ($value instanceof Buildable) {
@@ -171,6 +290,61 @@ trait HasWhere
         }
         $this->bindings[] = $value;
         return $field . ' ' . $operator . ' ?';
+    }
+
+    /**
+     * If $field uses the `column->key->subkey` JSON-path shortcut,
+     * expand it into the right driver-specific extraction. Otherwise
+     * fall through to the normal identifier escape.
+     *
+     * Supported drivers (auto-detected via the attached Connection):
+     *   - mysql / mariadb / sqlite — JSON_EXTRACT(col, '$.path')
+     *   - pgsql                    — col->'a'->>'b'
+     *
+     * If no Connection is attached we default to the JSON_EXTRACT form
+     * (which MySQL 5.7+ and SQLite 3.38+ both support).
+     *
+     * Path keys must be `[A-Za-z_][A-Za-z0-9_]*`. For exotic keys use
+     * `Raw::of('...')` directly.
+     */
+    private function resolveJsonField(string $field): string
+    {
+        if (!str_contains($field, '->')) {
+            return $this->cleanReference($field);
+        }
+        $parts = explode('->', $field);
+        $col   = array_shift($parts);
+        foreach ($parts as $part) {
+            if (!preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $part)) {
+                throw new \InvalidArgumentException(
+                    "Invalid JSON path segment '$part' — keys must match [A-Za-z_][A-Za-z0-9_]*. " .
+                    'Use Raw::of() for exotic key names.',
+                );
+            }
+        }
+        $colRef = $this->cleanReference($col);
+        $driver = $this->detectDriverForJsonPath();
+
+        if ($driver === 'pgsql') {
+            $expr = $colRef;
+            $last = array_pop($parts);
+            foreach ($parts as $intermediate) {
+                $expr .= "->'" . $intermediate . "'";
+            }
+            $expr .= "->>'" . $last . "'";
+            return $expr;
+        }
+        // mysql, mariadb, sqlite, or unknown: use the portable JSON_EXTRACT form.
+        $path = '$.' . implode('.', $parts);
+        return "JSON_EXTRACT($colRef, '$path')";
+    }
+
+    private function detectDriverForJsonPath(): ?string
+    {
+        // The trait is only mixed into builders that also use
+        // HasConnection (Query/Update/Delete), so $this->connection
+        // exists. The null check guards the not-yet-attached case.
+        return $this->connection?->getDriver();
     }
 
     /**

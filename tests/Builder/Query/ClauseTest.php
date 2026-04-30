@@ -119,7 +119,7 @@ final class ClauseTest extends TestCase
             . 'WHERE `u`.`active` = ? AND `u`.`deleted_at` IS NULL '
             . 'GROUP BY `u`.`id` HAVING COUNT(o.id) > 0 '
             . 'ORDER BY `u`.`id` DESC LIMIT 100 OFFSET 200',
-            $sql
+            $sql,
         );
         $this->assertSame([1], $bindings);
     }

@@ -34,18 +34,18 @@ final class JoinTest extends TestCase
                 'orders'   => ['AS' => ['`o`'], 'ON' => ['`orders`.`user_id` = `users`.`id`']],
                 'invoices' => ['AS' => ['`i`'], 'ON' => ['`invoices`.`id` = `orders`.`invoice_id`']],
             ],
-            $query->commands['INNER JOIN']
+            $query->commands['INNER JOIN'],
         );
 
         // Three top-level where entries: two grouped ANDs + one grouped OR.
         $this->assertCount(3, $query->commands['WHERE']);
         $this->assertSame('AND', $query->commands['WHERE'][0]['op']);
         $this->assertSame('AND', $query->commands['WHERE'][1]['op']);
-        $this->assertSame('OR',  $query->commands['WHERE'][2]['op']);
+        $this->assertSame('OR', $query->commands['WHERE'][2]['op']);
 
         $this->assertSame(
             ['David', 'Wyly', 'Lance', 'Badger', 'Joseph', 'Andrews', 'Andrews, III'],
-            $query->bindings
+            $query->bindings,
         );
     }
 
@@ -62,7 +62,7 @@ final class JoinTest extends TestCase
         $this->assertSame('`users` AS `u`', $query->commands['FROM'][0]);
         $this->assertSame(
             ['orders' => ['AS' => ['`o`'], 'ON' => ['`o`.`user_id` = `u`.`id`']]],
-            $query->commands['INNER JOIN']
+            $query->commands['INNER JOIN'],
         );
     }
 }

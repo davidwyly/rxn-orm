@@ -27,6 +27,7 @@ final class Update extends Builder implements Buildable
     use HasConnection;
 
     private ?string $table = null;
+    private bool    $allow_empty_where = false;
 
     /** @var array<string, mixed> */
     private array $set = [];
@@ -37,6 +38,17 @@ final class Update extends Builder implements Buildable
     public function table(string $table): self
     {
         $this->table = $table;
+        return $this;
+    }
+
+    /**
+     * Permit `UPDATE t SET ...` without a WHERE clause. Off by default
+     * — same safety guard as Delete::allowEmptyWhere(), since an
+     * UPDATE without WHERE rewrites every row in the table.
+     */
+    public function allowEmptyWhere(bool $allow = true): self
+    {
+        $this->allow_empty_where = $allow;
         return $this;
     }
 
@@ -91,6 +103,12 @@ final class Update extends Builder implements Buildable
         }
         if ($this->set === []) {
             throw new \LogicException('Update requires at least one set() assignment');
+        }
+        $hasWhere = !empty($this->commands['WHERE']);
+        if (!$hasWhere && !$this->allow_empty_where) {
+            throw new \LogicException(
+                'Update with no WHERE clause is blocked; call allowEmptyWhere() to opt in',
+            );
         }
 
         $setBindings   = [];

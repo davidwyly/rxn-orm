@@ -23,7 +23,7 @@ final class SubqueryTest extends TestCase
 
         $this->assertSame(
             'SELECT * FROM `posts` WHERE `author_id` IN (SELECT `id` FROM `users` WHERE `role` = ?)',
-            $sql
+            $sql,
         );
         $this->assertSame(['admin'], $bindings);
     }
@@ -45,7 +45,7 @@ final class SubqueryTest extends TestCase
         $this->assertSame(
             'SELECT `id`, `email` FROM `users` '
             . 'WHERE `active` = ? AND `id` NOT IN (SELECT `user_id` FROM `bans` WHERE `active` = ?)',
-            $sql
+            $sql,
         );
         $this->assertSame([1, 1], $bindings);
     }
@@ -68,7 +68,7 @@ final class SubqueryTest extends TestCase
             'SELECT * FROM (SELECT `user_id`, COUNT(*) AS order_count '
             . 'FROM `orders` GROUP BY `user_id` HAVING COUNT(*) > 5) AS `frequent` '
             . 'WHERE `order_count` > ?',
-            $sql
+            $sql,
         );
         $this->assertSame([10], $bindings);
     }
@@ -98,7 +98,7 @@ final class SubqueryTest extends TestCase
             'SELECT `u`.`id`, `u`.`email`, '
             . '(SELECT COUNT(*) FROM `orders` WHERE `user_id` = u.id) AS `order_count` '
             . 'FROM `users` AS `u` WHERE `u`.`active` = ?',
-            $sql
+            $sql,
         );
         $this->assertSame([1], $bindings);
     }

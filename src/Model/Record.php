@@ -8,6 +8,8 @@ use Rxn\Orm\Builder\Update;
 use Rxn\Orm\Db\Connection;
 
 /**
+ * @phpstan-consistent-constructor
+ *
  * Lightweight active-record base for models that map 1:1 to a table.
  *
  * Subclasses declare TABLE / PK constants and (optionally) relations
@@ -146,7 +148,7 @@ abstract class Record
         }
         throw new \LogicException(
             'No Connection bound for ' . $cls . '. Call Record::setConnection($db) ' .
-            'or ' . $cls . '::setConnection($db, ' . $cls . '::class).'
+            'or ' . $cls . '::setConnection($db, ' . $cls . '::class).',
         );
     }
 
@@ -317,7 +319,7 @@ abstract class Record
             if (is_array($value)) {
                 $out[$name] = array_map(
                     fn ($r) => $r instanceof Record ? $r->toArray() : $r,
-                    $value
+                    $value,
                 );
                 continue;
             }
@@ -534,20 +536,28 @@ abstract class Record
      * `$this->exists` is false for an upcoming INSERT, true for an
      * UPDATE — branch on it to differentiate. Throw to abort the save.
      */
-    protected function beforeSave(): void {}
+    protected function beforeSave(): void
+    {
+    }
 
     /**
      * Override to run code after save() succeeds. `$this->exists` is
      * always true here; check `dirtyForUpdate()` was empty if you
      * need to distinguish "no-op save" from "actual write."
      */
-    protected function afterSave(): void {}
+    protected function afterSave(): void
+    {
+    }
 
     /** Override to run code before delete()/forceDelete(). Throw to abort. */
-    protected function beforeDelete(): void {}
+    protected function beforeDelete(): void
+    {
+    }
 
     /** Override to run code after delete()/forceDelete() succeeds. */
-    protected function afterDelete(): void {}
+    protected function afterDelete(): void
+    {
+    }
 
     /**
      * Stamp CREATED_AT / UPDATED_AT into $this->attributes prior to
@@ -803,9 +813,9 @@ abstract class Record
             return $value;
         }
         return match (true) {
-            $type === 'int'                            => is_int($value)   ? $value : (int)$value,
+            $type === 'int'                            => is_int($value) ? $value : (int)$value,
             $type === 'float'                          => is_float($value) ? $value : (float)$value,
-            $type === 'bool', $type === 'boolean'      => is_bool($value)  ? $value : (bool)$value,
+            $type === 'bool', $type === 'boolean'      => is_bool($value) ? $value : (bool)$value,
             $type === 'string'                         => is_string($value) ? $value : (string)$value,
             $type === 'json', $type === 'array'        => is_string($value) ? json_decode($value, true) : $value,
             $type === 'datetime'                       => $value instanceof \DateTimeInterface ? $value : new \DateTimeImmutable((string)$value),

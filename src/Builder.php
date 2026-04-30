@@ -46,7 +46,7 @@ abstract class Builder
         return "'$value'";
     }
 
-    function changeKey(&$array, $old_key, $new_key)
+    public function changeKey(&$array, $old_key, $new_key)
     {
         if (!array_key_exists($old_key, $array)) {
             return $array;
@@ -110,7 +110,8 @@ abstract class Builder
         $this->commands = array_merge_recursive((array)$this->commands, (array)$builder->commands);
     }
 
-    protected function loadGroupCommands(Builder $builder, $type) {
+    protected function loadGroupCommands(Builder $builder, $type)
+    {
         $this->commands[$type][] = $builder->commands;
     }
 
@@ -149,19 +150,17 @@ abstract class Builder
         if (is_array($operand)) {
             $bindings     = [];
             $parsed_array = [];
-            if (empty($bindings)) {
-                foreach ($operand as $value) {
-                    $parsed_array[] = '?';
-                    $bindings[]     = $value;
-                }
-                return ['(' . implode(",", $parsed_array) . ')', $bindings];
+            foreach ($operand as $value) {
+                $parsed_array[] = '?';
+                $bindings[]     = $value;
             }
+            return ['(' . implode(",", $parsed_array) . ')', $bindings];
         }
-
         return ['?', [$operand]];
     }
 
-    public function build() {
+    public function build()
+    {
         $parser = new QueryParser($this);
         $this->rawSql = $parser->getSql();
     }
@@ -177,13 +176,9 @@ abstract class Builder
                     break;
 
                 case 'INNER JOIN':
-                    // no break
                 case 'LEFT JOIN':
-                    // no break
                 case 'RIGHT JOIN':
-                    // no break
                 case 'CROSS JOIN':
-                    // no break
                 case 'NATURAL JOIN':
                     $this->parseJoinAliases($command_details, $command_type);
                     break;

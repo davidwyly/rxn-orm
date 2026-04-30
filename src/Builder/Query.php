@@ -3,9 +3,9 @@
 namespace Rxn\Orm\Builder;
 
 use Rxn\Orm\Builder;
-use Rxn\Orm\Builder\Query\Select;
 use Rxn\Orm\Builder\Query\From;
 use Rxn\Orm\Builder\Query\Join;
+use Rxn\Orm\Builder\Query\Select;
 
 /**
  * Fluent SELECT query builder. Accumulates commands into
@@ -18,7 +18,30 @@ class Query extends Builder implements Buildable
     use HasWhere;
     use HasConnection;
 
+    /**
+     * Set the SELECT column list. Calling with explicit columns
+     * REPLACES any prior selection — this matches user intent when
+     * coming off `Connection::table()` (which seeds `SELECT *`) and
+     * matches Eloquent's behavior. To append columns to an existing
+     * selection use `addSelect()` or `selectSubquery()`.
+     */
     public function select(array $columns = ['*'], bool $distinct = false): Query
+    {
+        if ($columns !== ['*']) {
+            unset($this->commands['SELECT'], $this->commands['SELECT DISTINCT']);
+        }
+        $select = new Select();
+        $select->set($columns, $distinct);
+        $this->loadCommands($select);
+        return $this;
+    }
+
+    /**
+     * Append columns to the existing SELECT list (additive). Use this
+     * when you want to keep prior columns and add more — e.g. when
+     * stitching together a query in pieces.
+     */
+    public function addSelect(array $columns, bool $distinct = false): Query
     {
         $select = new Select();
         $select->set($columns, $distinct);
@@ -55,7 +78,7 @@ class Query extends Builder implements Buildable
 
     /**
      * @param string|Buildable $table bare identifier, or a nested
-     *        Buildable whose SQL becomes `(subquery) AS alias`.
+     *                                Buildable whose SQL becomes `(subquery) AS alias`.
      */
     public function from($table, ?string $alias = null): Query
     {
@@ -186,8 +209,10 @@ class Query extends Builder implements Buildable
 
     /**
      * Execute and return all matching rows as associative arrays.
+     * Subclasses (notably ModelQuery) may narrow the element type to
+     * a hydrated object — the loose `array` return is intentional.
      *
-     * @return array<int, array<string, mixed>>
+     * @return array<int, mixed>
      */
     public function get(): array
     {
@@ -322,7 +347,7 @@ class Query extends Builder implements Buildable
     {
         $connection = $this->requireConnection(__FUNCTION__);
         [$sql, $bindings] = $this->toSql();
-        $stmt = $connection->statement($sql, $bindings);
+        $stmt = $connection->selectStatement($sql, $bindings);
         while (($row = $stmt->fetch(\PDO::FETCH_ASSOC)) !== false) {
             yield $row;
         }

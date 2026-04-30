@@ -17,13 +17,16 @@ use Rxn\Orm\Model\Relation;
 
 $pdo = bench_make_pdo(10_000); // 100 users × 100 posts each
 
-class EagerUser extends Record {
+class EagerUser extends Record
+{
     public const TABLE = 'users';
-    public function posts(): Relation {
+    public function posts(): Relation
+    {
         return $this->hasMany(EagerPost::class, 'user_id');
     }
 }
-class EagerPost extends Record {
+class EagerPost extends Record
+{
     public const TABLE = 'posts';
 }
 Record::clearConnections();
@@ -40,7 +43,9 @@ $nPlusOneMs = bench_time(function () {
         $posts = $relation->queryFor($u->toArray())->get(); // +1 query per user
         $totalPosts += count($posts);
     }
-    if ($totalPosts === 0) throw new RuntimeException('expected posts');
+    if ($totalPosts === 0) {
+        throw new RuntimeException('expected posts');
+    }
 });
 echo bench_format_row('rxn-orm N+1 (101 q)', $nPlusOneMs, null) . "\n";
 
@@ -51,7 +56,9 @@ $eagerMs = bench_time(function () {
     foreach ($users as $u) {
         $totalPosts += count($u->posts);
     }
-    if ($totalPosts === 0) throw new RuntimeException('expected posts');
+    if ($totalPosts === 0) {
+        throw new RuntimeException('expected posts');
+    }
 });
 echo bench_format_row('rxn-orm eager (2 q)', $eagerMs, $nPlusOneMs) . "\n";
 

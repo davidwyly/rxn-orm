@@ -199,9 +199,12 @@ class Runner
     private function forwardFiles(): array
     {
         $all = glob($this->directory . '/*.sql') ?: [];
-        $forward = array_filter($all, fn (string $f) => !str_ends_with($f, '.down.sql'));
+        $forward = array_values(array_filter(
+            $all,
+            fn (string $f) => !str_ends_with($f, '.down.sql'),
+        ));
         sort($forward, SORT_STRING);
-        return array_values($forward);
+        return $forward;
     }
 
     private function basename(string $file): string

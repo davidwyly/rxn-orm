@@ -32,7 +32,7 @@ trait HasConnection
         if ($this->connection === null) {
             throw new \LogicException(
                 static::class . "::$method requires a Connection. " .
-                'Call setConnection() first, or use Connection::table()/query() to start the builder.'
+                'Call setConnection() first, or use Connection::table()/query() to start the builder.',
             );
         }
         return $this->connection;

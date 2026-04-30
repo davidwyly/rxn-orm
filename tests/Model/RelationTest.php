@@ -5,7 +5,6 @@ namespace Rxn\Orm\Tests\Model;
 use PDO;
 use Rxn\Orm\Db\Connection;
 use Rxn\Orm\Model\Record;
-use Rxn\Orm\Tests\Model\Fixtures\Comment;
 use Rxn\Orm\Tests\Model\Fixtures\Post;
 use Rxn\Orm\Tests\Model\Fixtures\Profile;
 use Rxn\Orm\Tests\Model\Fixtures\User;
@@ -157,4 +156,3 @@ final class RelationTest extends SqliteTestCase
         $this->assertCount(2, $posts);
     }
 }
-

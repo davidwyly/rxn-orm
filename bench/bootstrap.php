@@ -32,7 +32,7 @@ function bench_make_pdo(int $rows = 10_000): PDO
     $pdo->beginTransaction();
     $stmt = $pdo->prepare(
         'INSERT INTO posts (id, user_id, title, body, views, published, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)'
+         VALUES (?, ?, ?, ?, ?, ?, ?)',
     );
     $now = gmdate('Y-m-d H:i:s');
     for ($i = 1; $i <= $rows; $i++) {
