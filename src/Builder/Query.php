@@ -21,6 +21,9 @@ class Query extends Builder implements Buildable
     /** Row-level lock to apply: 'update', 'shared', or null. */
     private ?string $lock = null;
 
+    /** Concurrency modifier on the lock: null, 'skip-locked', 'no-wait'. */
+    private ?string $lockMode = null;
+
     /**
      * Queued UNION / UNION ALL clauses, in order. Each entry is
      *   ['kind' => 'distinct'|'all', 'sql' => string, 'bindings' => array]
@@ -253,8 +256,10 @@ class Query extends Builder implements Buildable
 
     /**
      * Acquire a row-level read (shared) lock. Driver-aware:
-     *   - MySQL:    `LOCK IN SHARE MODE`
-     *   - MariaDB:  `LOCK IN SHARE MODE`
+     *   - MySQL:    `LOCK IN SHARE MODE` (or `FOR SHARE` when paired
+     *               with skipLocked()/noWait() — the legacy form
+     *               doesn't accept those modifiers)
+     *   - MariaDB:  same as MySQL
      *   - Postgres: `FOR SHARE`
      *   - SQLite:   no-op
      */
@@ -262,6 +267,47 @@ class Query extends Builder implements Buildable
     {
         $this->lock = 'shared';
         return $this;
+    }
+
+    /**
+     * Append `SKIP LOCKED` to the row lock. The classic job-queue
+     * pattern: workers each `SELECT … LIMIT N FOR UPDATE SKIP LOCKED`
+     * to claim a batch without contending on already-claimed rows.
+     *
+     * Requires MySQL 8.0+ or Postgres 9.5+. SQLite has no row locks
+     * and silently no-ops the entire lock clause. Must be chained
+     * after `lockForUpdate()` or `sharedLock()`.
+     */
+    public function skipLocked(): Query
+    {
+        $this->requireLock(__FUNCTION__);
+        $this->lockMode = 'skip-locked';
+        return $this;
+    }
+
+    /**
+     * Append `NOWAIT` to the row lock. Causes the statement to fail
+     * immediately with a "could not obtain lock" error rather than
+     * blocking on contended rows. Useful for "try-lock" patterns
+     * where the caller has a fallback.
+     *
+     * Requires MySQL 8.0+ or Postgres. SQLite no-ops. Must be chained
+     * after `lockForUpdate()` or `sharedLock()`.
+     */
+    public function noWait(): Query
+    {
+        $this->requireLock(__FUNCTION__);
+        $this->lockMode = 'no-wait';
+        return $this;
+    }
+
+    private function requireLock(string $method): void
+    {
+        if ($this->lock === null) {
+            throw new \LogicException(
+                "Query::$method requires a prior lockForUpdate() or sharedLock() call",
+            );
+        }
     }
 
     /**
@@ -341,18 +387,32 @@ class Query extends Builder implements Buildable
      * Resolve the driver-specific row-locking suffix. Silent no-op
      * for SQLite or when no Connection is attached — locking outside
      * a known driver is meaningless.
+     *
+     * For shared locks combined with SKIP LOCKED / NOWAIT on MySQL
+     * we use the modern `FOR SHARE` form; the legacy
+     * `LOCK IN SHARE MODE` doesn't accept those modifiers (and is
+     * deprecated in MySQL 8 anyway). MariaDB follows the same rule.
      */
     private function renderLockClause(): string
     {
         $driver = $this->connection?->getDriver();
+        $suffix = match ($this->lockMode) {
+            'skip-locked' => ' SKIP LOCKED',
+            'no-wait'     => ' NOWAIT',
+            default       => '',
+        };
+
+        $sharedNeedsForShare = $this->lockMode !== null;
+
         return match ([$driver, $this->lock]) {
-            ['mysql',   'update'] => ' FOR UPDATE',
-            ['mariadb', 'update'] => ' FOR UPDATE',
-            ['pgsql',   'update'] => ' FOR UPDATE',
-            ['mysql',   'shared'] => ' LOCK IN SHARE MODE',
-            ['mariadb', 'shared'] => ' LOCK IN SHARE MODE',
-            ['pgsql',   'shared'] => ' FOR SHARE',
-            default               => '', // sqlite + unknown drivers
+            ['mysql',   'update'] => ' FOR UPDATE' . $suffix,
+            ['mariadb', 'update'] => ' FOR UPDATE' . $suffix,
+            ['pgsql',   'update'] => ' FOR UPDATE' . $suffix,
+            ['pgsql',   'shared'] => ' FOR SHARE' . $suffix,
+            ['mysql',   'shared'], ['mariadb', 'shared'] => $sharedNeedsForShare
+                ? ' FOR SHARE' . $suffix
+                : ' LOCK IN SHARE MODE',
+            default => '', // sqlite + unknown drivers
         };
     }
 

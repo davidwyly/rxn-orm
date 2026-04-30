@@ -149,6 +149,23 @@ $db->transaction(function (Connection $db) {
 });
 ```
 
+### Row locking (job-queue pattern)
+
+```php
+// Worker claims up to 10 pending jobs without contending with other workers
+$jobs = $db->transaction(function (Connection $db) {
+    return $db->table('jobs')
+        ->where('status', '=', 'pending')
+        ->orderBy('id')
+        ->limit(10)
+        ->lockForUpdate()
+        ->skipLocked()        // workers stride past each other
+        ->get();
+});
+```
+
+Driver-aware: emits `FOR UPDATE SKIP LOCKED` on MySQL 8+ / Postgres, `NOWAIT` if you prefer immediate failure over waiting (`->noWait()`). On SQLite the entire lock clause is a silent no-op (no row-level locking concept). On MySQL, `sharedLock()->skipLocked()` automatically uses `FOR SHARE` rather than the legacy `LOCK IN SHARE MODE` (which doesn't accept the modifier).
+
 ### Pagination, chunking, cursors
 
 ```php
@@ -349,6 +366,7 @@ Migration files are plain `.sql`, named `NNNN_description.sql` with optional `NN
 | INSERT ... SELECT | ✅ kept (`Insert::fromQuery()`) |
 | `whereColumn()` | ✅ kept |
 | `lockForUpdate()` / `sharedLock()` | ✅ kept (driver-aware) |
+| `skipLocked()` / `noWait()` | ✅ kept (chains after a lock) |
 | `Collection` class | ❌ skipped — PHP arrays are fine |
 | `__call`/`__callStatic` magic | ❌ skipped — every method is real |
 | Facades / global service container | ❌ skipped — bring your own PDO |

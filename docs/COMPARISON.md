@@ -258,7 +258,8 @@ A 13-pattern test suite (`tests/Comparison/`) exercises the queries that histori
 | Portable upsert | ✅ `upsert($keys, $cols)` | ✅ `upsert(...)` | tied |
 | `INSERT IGNORE` / `ON CONFLICT DO NOTHING` | ✅ `ignore()` (driver-aware) | ✅ `insertOrIgnore()` | tied |
 | `FOR UPDATE` / shared lock | ✅ `lockForUpdate()` / `sharedLock()` (driver-aware) | ✅ same | tied |
-| `SKIP LOCKED` (Postgres/MySQL 8.0+) | not yet built-in; append `Raw::of('SKIP LOCKED')` | `lockForUpdate()` doesn't expose SKIP LOCKED either | tied |
+| `SKIP LOCKED` (Postgres/MySQL 8.0+) | ✅ `->skipLocked()` chains after the lock | ❌ not built-in; raw SQL | **rxn-orm wins** |
+| `NOWAIT` | ✅ `->noWait()` | ❌ not built-in; raw SQL | **rxn-orm wins** |
 | `DISTINCT ON` (Postgres) | raw SQL | raw SQL | tied (driver-specific feature) |
 | Polymorphic relations | not built-in | `morphTo`, `morphMany` | **Eloquent wins** (deliberate skip on our side) |
 | `hasManyThrough` | not built-in | built-in | **Eloquent wins** (deliberate skip) |
@@ -307,7 +308,6 @@ rxn-orm refuses `Update`/`Delete` with no WHERE by default — must `->allowEmpt
 |---|---|---|
 | **No production track record** | Pre-1.0; battle-testing takes years. | CI matrix runs MySQL 8 + Postgres 16 + SQLite × PHP 8.1/8.2/8.3. |
 | **No polymorphic / through relations** | Some schemas rely on these. | Deliberate skip — usually a code smell; build with two `belongsTo` if needed. |
-| **No `SKIP LOCKED`** | Job queues with concurrent workers want this. | Currently append via raw SQL after `lockForUpdate()`; native helper filed as follow-up. |
 | **No Schema DSL** | Migrations are raw SQL files. | Deliberate — Schema DSLs are where lightweight ORMs become heavyweight. |
 | **No event observers** | Side-effects need to live in `beforeSave`/`afterSave` overrides. | Honest tradeoff: explicit > magical. |
 
