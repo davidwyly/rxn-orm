@@ -211,6 +211,36 @@ trait HasWhere
         return $this->whereDate($f, $op, $v, 'or');
     }
 
+    /**
+     * Compare two columns directly: emits `field1 op field2` with no
+     * parameter binding on either side. The honest replacement for
+     * `where('a', '=', Raw::of('b'))` — slightly more discoverable
+     * and matches Eloquent's `whereColumn` sugar.
+     *
+     *   $q->whereColumn('p.user_id', '=', 'c.user_id')
+     *
+     * @return static
+     */
+    public function whereColumn(string $first, string $operator, string $second, string $type = 'and')
+    {
+        $this->assertWhereOperator($operator);
+        $expr = $this->cleanReference($first) . ' ' . strtoupper($operator) . ' ' . $this->cleanReference($second);
+        $this->commands['WHERE'][] = [
+            'op'   => $this->normalizeOp($type),
+            'expr' => $expr,
+        ];
+        return $this;
+    }
+
+    /** @return static */ public function andWhereColumn(string $a, string $op, string $b)
+    {
+        return $this->whereColumn($a, $op, $b, 'and');
+    }
+    /** @return static */ public function orWhereColumn(string $a, string $op, string $b)
+    {
+        return $this->whereColumn($a, $op, $b, 'or');
+    }
+
     /** @return static */
     private function appendExists(Buildable $subquery, bool $negate, string $type)
     {

@@ -70,7 +70,7 @@ $users = User::with('posts.comments')->get();
 // rxn-orm
 $db->table('comments', 'c')
     ->join('posts', 'p.id', '=', 'c.post_id', 'p')
-    ->where('c.user_id', '=', Raw::of('p.user_id'))
+    ->whereColumn('c.user_id', '=', 'p.user_id')
     ->get();
 
 // Eloquent
@@ -80,7 +80,7 @@ DB::table('comments AS c')
     ->get();
 ```
 
-**Verdict:** Eloquent's `whereColumn()` is more discoverable than `Raw::of('p.user_id')`. Filed as a follow-up — `whereColumn` is ~10 LOC and would close this gap.
+**Verdict:** tied. `whereColumn(a, op, b)` ships in both — emits `a op b` with no parameter binding on either side.
 
 ### Window function (top-N per group)
 
@@ -146,29 +146,32 @@ $db->select('WITH RECURSIVE descendants AS (
 ### UNION
 
 ```php
-// rxn-orm — manual concat (gap)
-[$leftSql, $leftB]   = $aQuery->toSql();
-[$rightSql, $rightB] = $bQuery->toSql();
-$db->select("$leftSql UNION ALL $rightSql", [...$leftB, ...$rightB]);
+// rxn-orm
+$aQuery->union($bQuery)->orderBy('name')->get();
+$aQuery->unionAll($bQuery)->limit(100)->get();
 
-// Eloquent — built-in
-$aQuery->union($bQuery)->get();
+// Eloquent
+$aQuery->union($bQuery)->orderBy('name')->get();
 ```
 
-**Verdict:** **Eloquent wins** — `union()` is built-in. rxn-orm requires a 5-line workaround. Filed as a follow-up (`Query::union(Buildable)`, ~30 LOC).
+**Verdict:** tied. Both ORMs have built-in `union()` / `unionAll()`. ORDER BY/LIMIT/OFFSET on the outer query apply to the combined result.
 
 ### INSERT ... SELECT
 
 ```php
-// rxn-orm — manual concat (gap)
-[$selectSql, $bindings] = $query->toSql();
-$db->statement("INSERT INTO archive (id, title) $selectSql", $bindings);
+// rxn-orm
+(new Insert())->into('archive')
+    ->columns(['id', 'title'])
+    ->fromQuery($db->table('posts')->select(['id', 'title'])->where('archived', '=', 1))
+    ->setConnection($db)
+    ->execute();
 
-// Eloquent — built-in
-DB::table('archive')->insertUsing(['id', 'title'], $query);
+// Eloquent
+DB::table('archive')->insertUsing(['id', 'title'],
+    DB::table('posts')->select(['id', 'title'])->where('archived', 1));
 ```
 
-**Verdict:** **Eloquent wins** — `insertUsing()` is built-in. Same workaround pattern; ~30 LOC to close.
+**Verdict:** tied. Both ORMs ship the SELECT-source insert form.
 
 ### Many-to-many: attach / detach / sync
 
@@ -239,14 +242,14 @@ A 13-pattern test suite (`tests/Comparison/`) exercises the queries that histori
 | Recursive CTE | raw SQL via `$db->select()` | raw SQL via `DB::select()` | tied |
 | Window function (`ROW_NUMBER`, `RANK`) | `Raw::of()` inside `select([])` | `selectRaw()` | tied — rxn-orm slightly cleaner |
 | Conditional aggregate (`SUM(CASE WHEN…)`) | `Raw::of()` per column | `selectRaw('…')` blob | tied; preference |
-| Self-join with column comparison | `where('a', '=', Raw::of('b'))` | `whereColumn('a', '=', 'b')` | **Eloquent wins (sugar)** |
+| Self-join with column comparison | `whereColumn('a', '=', 'b')` | `whereColumn('a', '=', 'b')` | tied |
 | Subquery in FROM (derived table) | `from($subquery, 'alias')` | `fromSub($closure, 'alias')` | tied |
 | Subquery in WHERE | `whereExists($sub)`, `whereIn($field, $sub)` | `whereExists($closure)`, `whereIn($field, $sub)` | tied |
 | Correlated subquery in SELECT | `selectSubquery($sub, 'alias')` | `selectSub($sub, 'alias')` | tied |
 | `withCount('relation')` | ✅ built-in | ✅ built-in | tied |
 | GROUP BY + HAVING | ✅ built-in | ✅ built-in | tied |
-| UNION / UNION ALL | ❌ manual concat | ✅ `union()` built-in | **Eloquent wins** |
-| INSERT … SELECT | ❌ manual concat | ✅ `insertUsing()` built-in | **Eloquent wins** |
+| UNION / UNION ALL | ✅ `union()` / `unionAll()` | ✅ `union()` built-in | tied |
+| INSERT … SELECT | ✅ `Insert::fromQuery($q)` | ✅ `insertUsing()` built-in | tied |
 | Bulk UPDATE via correlated subquery | `set([col => Raw::of('(SELECT …)')])` | same idiom | tied |
 | Bulk UPDATE with JOIN | dialect-specific raw SQL | dialect-specific raw SQL | tied (no portable solution) |
 | `WHERE NOT IN (subquery returning NULL)` gotcha | unguarded — same trap | unguarded — same trap | tied (both ORMs let you shoot yourself) |
@@ -254,12 +257,15 @@ A 13-pattern test suite (`tests/Comparison/`) exercises the queries that histori
 | JSON path (`settings->theme`) | ✅ built-in (driver-aware) | ✅ built-in | tied |
 | Portable upsert | ✅ `upsert($keys, $cols)` | ✅ `upsert(...)` | tied |
 | `INSERT IGNORE` / `ON CONFLICT DO NOTHING` | ✅ `ignore()` (driver-aware) | ✅ `insertOrIgnore()` | tied |
-| `FOR UPDATE` / `SKIP LOCKED` | not yet built-in; raw SQL | `lockForUpdate()`, `sharedLock()` | **Eloquent wins** |
+| `FOR UPDATE` / shared lock | ✅ `lockForUpdate()` / `sharedLock()` (driver-aware) | ✅ same | tied |
+| `SKIP LOCKED` (Postgres/MySQL 8.0+) | not yet built-in; append `Raw::of('SKIP LOCKED')` | `lockForUpdate()` doesn't expose SKIP LOCKED either | tied |
 | `DISTINCT ON` (Postgres) | raw SQL | raw SQL | tied (driver-specific feature) |
 | Polymorphic relations | not built-in | `morphTo`, `morphMany` | **Eloquent wins** (deliberate skip on our side) |
 | `hasManyThrough` | not built-in | built-in | **Eloquent wins** (deliberate skip) |
 
-**Score:** Eloquent wins on **5** patterns (UNION, INSERT...SELECT, locking, polymorphism, hasManyThrough, whereColumn sugar). 4 of those are 30-LOC additions to rxn-orm; the polymorphic/morph relations are deliberate non-goals.
+**Score:** Eloquent wins on **2** patterns (polymorphic relations, `hasManyThrough`) — both deliberate skips on our side. Every other pattern in this matrix is tied.
+
+UNION, INSERT...SELECT, `whereColumn`, and `FOR UPDATE` / `FOR SHARE` were all gaps in earlier rxn-orm versions; the v0.4 series closed them.
 
 ---
 
@@ -300,10 +306,8 @@ rxn-orm refuses `Update`/`Delete` with no WHERE by default — must `->allowEmpt
 | Area | Why it matters | Mitigation |
 |---|---|---|
 | **No production track record** | Pre-1.0; battle-testing takes years. | CI matrix runs MySQL 8 + Postgres 16 + SQLite × PHP 8.1/8.2/8.3. |
-| **No `union()` / `insertUsing()`** | Common patterns require manual SQL concat. | Filed as follow-ups — ~30 LOC each. |
-| **No locking helpers (`FOR UPDATE`, `SKIP LOCKED`)** | Job queues, optimistic concurrency. | Append `Raw::of('FOR UPDATE')` to bypass; first-class API filed as follow-up. |
 | **No polymorphic / through relations** | Some schemas rely on these. | Deliberate skip — usually a code smell; build with two `belongsTo` if needed. |
-| **No `whereColumn()` sugar** | Self-join column comparisons need `Raw::of()`. | ~10 LOC follow-up. |
+| **No `SKIP LOCKED`** | Job queues with concurrent workers want this. | Currently append via raw SQL after `lockForUpdate()`; native helper filed as follow-up. |
 | **No Schema DSL** | Migrations are raw SQL files. | Deliberate — Schema DSLs are where lightweight ORMs become heavyweight. |
 | **No event observers** | Side-effects need to live in `beforeSave`/`afterSave` overrides. | Honest tradeoff: explicit > magical. |
 

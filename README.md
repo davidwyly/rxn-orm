@@ -345,6 +345,10 @@ Migration files are plain `.sql`, named `NNNN_description.sql` with optional `NN
 | Mass-assignment guard (`$fillable`) | ✅ kept (allowlist only — no `$guarded`) |
 | Portable upsert | ✅ kept |
 | Migrations | ✅ kept (raw SQL files; no Schema DSL) |
+| UNION / UNION ALL | ✅ kept (`union()` / `unionAll()`) |
+| INSERT ... SELECT | ✅ kept (`Insert::fromQuery()`) |
+| `whereColumn()` | ✅ kept |
+| `lockForUpdate()` / `sharedLock()` | ✅ kept (driver-aware) |
 | `Collection` class | ❌ skipped — PHP arrays are fine |
 | `__call`/`__callStatic` magic | ❌ skipped — every method is real |
 | Facades / global service container | ❌ skipped — bring your own PDO |

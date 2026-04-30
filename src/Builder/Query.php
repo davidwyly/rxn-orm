@@ -18,6 +18,20 @@ class Query extends Builder implements Buildable
     use HasWhere;
     use HasConnection;
 
+    /** Row-level lock to apply: 'update', 'shared', or null. */
+    private ?string $lock = null;
+
+    /**
+     * Queued UNION / UNION ALL clauses, in order. Each entry is
+     *   ['kind' => 'distinct'|'all', 'sql' => string, 'bindings' => array]
+     * The base query's WHERE/GROUP BY/HAVING apply to the first
+     * SELECT only; ORDER BY/LIMIT/OFFSET apply to the COMBINED
+     * result (each leaf gets wrapped in parens at toSql time).
+     *
+     * @var array<int, array{kind: string, sql: string, bindings: array}>
+     */
+    private array $unions = [];
+
     /**
      * Set the SELECT column list. Calling with explicit columns
      * REPLACES any prior selection — this matches user intent when
@@ -194,6 +208,62 @@ class Query extends Builder implements Buildable
     }
 
     /**
+     * Append a UNION (DISTINCT) of $other to this query. Both queries
+     * must have the same number of result columns in the same order.
+     * Bindings from $other merge into the combined query's binding
+     * stream in order.
+     *
+     * ORDER BY / LIMIT / OFFSET on the outer query apply to the
+     * COMBINED result — each side gets wrapped in parens, then the
+     * outer clauses appear at the end.
+     */
+    public function union(Buildable $other): Query
+    {
+        return $this->addUnion($other, 'distinct');
+    }
+
+    /** Same as union() but uses UNION ALL — duplicates preserved. */
+    public function unionAll(Buildable $other): Query
+    {
+        return $this->addUnion($other, 'all');
+    }
+
+    private function addUnion(Buildable $other, string $kind): Query
+    {
+        [$sql, $bindings] = $other->toSql();
+        $this->unions[] = ['kind' => $kind, 'sql' => $sql, 'bindings' => $bindings];
+        return $this;
+    }
+
+    /**
+     * Acquire a row-level write lock. Driver-aware:
+     *   - MySQL/MariaDB: `FOR UPDATE`
+     *   - Postgres:      `FOR UPDATE`
+     *   - SQLite:        no-op (no row-level locking concept)
+     *
+     * Only meaningful inside a transaction. Outside a transaction
+     * the lock is released the moment the statement completes.
+     */
+    public function lockForUpdate(): Query
+    {
+        $this->lock = 'update';
+        return $this;
+    }
+
+    /**
+     * Acquire a row-level read (shared) lock. Driver-aware:
+     *   - MySQL:    `LOCK IN SHARE MODE`
+     *   - MariaDB:  `LOCK IN SHARE MODE`
+     *   - Postgres: `FOR SHARE`
+     *   - SQLite:   no-op
+     */
+    public function sharedLock(): Query
+    {
+        $this->lock = 'shared';
+        return $this;
+    }
+
+    /**
      * Materialize the builder state into a single SQL string +
      * positional-bindings array.
      *
@@ -201,8 +271,88 @@ class Query extends Builder implements Buildable
      */
     public function toSql(): array
     {
+        if ($this->unions !== []) {
+            return $this->toSqlWithUnions();
+        }
         $parser = new QueryParser($this);
-        return [$parser->getSql(), array_values($this->bindings)];
+        $sql    = $parser->getSql();
+        if ($this->lock !== null) {
+            $sql .= $this->renderLockClause();
+        }
+        return [$sql, array_values($this->bindings)];
+    }
+
+    /**
+     * Render the UNION form: `(base) UNION (other) ... ORDER BY ... LIMIT ...`.
+     * The base's ORDER BY / LIMIT / OFFSET are stripped (so they don't
+     * accidentally apply only to the first SELECT) and re-emitted at
+     * the end against the combined result. Locks are attached to the
+     * combined statement, not the base.
+     *
+     * @return array{0: string, 1: array}
+     */
+    private function toSqlWithUnions(): array
+    {
+        // Render the base WITHOUT outer-result clauses so they don't
+        // accidentally bind only to the first SELECT.
+        $baseClone = clone $this;
+        $baseClone->unions = [];
+        $baseClone->lock   = null;
+        unset(
+            $baseClone->commands['ORDER BY'],
+            $baseClone->commands['LIMIT'],
+            $baseClone->commands['OFFSET'],
+        );
+        [$baseSql, $baseBindings] = $baseClone->toSql();
+
+        // No parens around each side — SQLite rejects them; MySQL and
+        // Postgres accept both forms. Sub-queries with their own
+        // ORDER BY/LIMIT aren't valid in a UNION leaf per SQL standard
+        // anyway; users who need that should compose via from(subquery).
+        $parts    = [$baseSql];
+        $bindings = $baseBindings;
+        foreach ($this->unions as $u) {
+            $glue   = $u['kind'] === 'all' ? 'UNION ALL' : 'UNION';
+            $parts[] = $glue . ' ' . $u['sql'];
+            foreach ($u['bindings'] as $b) {
+                $bindings[] = $b;
+            }
+        }
+        $sql = implode(' ', $parts);
+
+        // Outer clauses against the combined result.
+        if (!empty($this->commands['ORDER BY'])) {
+            $sql .= ' ORDER BY ' . implode(', ', $this->commands['ORDER BY']);
+        }
+        if (!empty($this->commands['LIMIT'])) {
+            $sql .= ' LIMIT ' . $this->commands['LIMIT'][0];
+        }
+        if (!empty($this->commands['OFFSET'])) {
+            $sql .= ' OFFSET ' . $this->commands['OFFSET'][0];
+        }
+        if ($this->lock !== null) {
+            $sql .= $this->renderLockClause();
+        }
+        return [$sql, $bindings];
+    }
+
+    /**
+     * Resolve the driver-specific row-locking suffix. Silent no-op
+     * for SQLite or when no Connection is attached — locking outside
+     * a known driver is meaningless.
+     */
+    private function renderLockClause(): string
+    {
+        $driver = $this->connection?->getDriver();
+        return match ([$driver, $this->lock]) {
+            ['mysql',   'update'] => ' FOR UPDATE',
+            ['mariadb', 'update'] => ' FOR UPDATE',
+            ['pgsql',   'update'] => ' FOR UPDATE',
+            ['mysql',   'shared'] => ' LOCK IN SHARE MODE',
+            ['mariadb', 'shared'] => ' LOCK IN SHARE MODE',
+            ['pgsql',   'shared'] => ' FOR SHARE',
+            default               => '', // sqlite + unknown drivers
+        };
     }
 
     // -- terminal methods (require an attached Connection) -------------

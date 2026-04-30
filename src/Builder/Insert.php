@@ -40,6 +40,12 @@ final class Insert extends Builder implements Buildable
     /** True when insertOrIgnore was requested. */
     private bool $ignore = false;
 
+    /** Source SELECT for INSERT...SELECT (mutually exclusive with row()/rows()). */
+    private ?Buildable $sourceQuery = null;
+
+    /** Target column list for INSERT...SELECT. */
+    private array $sourceColumns = [];
+
     /** @var string[] */
     private array $returning = [];
 
@@ -161,6 +167,9 @@ final class Insert extends Builder implements Buildable
         if ($row === []) {
             throw new \InvalidArgumentException('Insert::row requires a non-empty [column => value] map');
         }
+        if ($this->sourceQuery !== null) {
+            throw new \LogicException('row()/rows() and fromQuery() are mutually exclusive');
+        }
         $this->rows[] = $row;
         return $this;
     }
@@ -176,13 +185,59 @@ final class Insert extends Builder implements Buildable
         return $this;
     }
 
+    /**
+     * INSERT INTO target (cols) SELECT ... FROM source.
+     *
+     *   $archive = (new Insert())
+     *       ->into('archive_posts')
+     *       ->columns(['id', 'title'])
+     *       ->fromQuery(
+     *           $db->table('posts')->select(['id', 'title'])->where('archived', '=', 1)
+     *       );
+     *   $archive->setConnection($db)->execute();
+     *
+     * Mutually exclusive with row() / rows(). The SELECT must return
+     * the same number of columns as `columns()` declares, in the
+     * same order — that's a SQL constraint, not enforced here.
+     */
+    public function fromQuery(Buildable $source): self
+    {
+        if ($this->rows !== []) {
+            throw new \LogicException('fromQuery() and row()/rows() are mutually exclusive');
+        }
+        $this->sourceQuery = $source;
+        return $this;
+    }
+
+    /**
+     * Declare the target column list for INSERT...SELECT. Required
+     * when using fromQuery() so the emitted SQL is unambiguous about
+     * which columns the SELECT result populates.
+     *
+     * @param string[] $columns
+     */
+    public function columns(array $columns): self
+    {
+        if ($columns === []) {
+            throw new \InvalidArgumentException('columns() requires at least one column');
+        }
+        $this->sourceColumns = array_values($columns);
+        return $this;
+    }
+
     public function toSql(): array
     {
         if ($this->table === null) {
             throw new \LogicException('Insert::into must be called before toSql');
         }
+
+        // INSERT...SELECT path
+        if ($this->sourceQuery !== null) {
+            return $this->renderInsertSelect();
+        }
+
         if ($this->rows === []) {
-            throw new \LogicException('Insert requires at least one row');
+            throw new \LogicException('Insert requires at least one row (or a fromQuery)');
         }
 
         // Union of column names across every row, first-seen order.
@@ -357,6 +412,40 @@ final class Insert extends Builder implements Buildable
         }
         $sql = 'ON CONFLICT (' . implode(', ', $escapedKeys) . ') DO UPDATE SET '
              . implode(', ', $assignments);
+        return [$sql, $bindings];
+    }
+
+    /**
+     * Emit `INSERT INTO target (cols) <selectSql>` for the
+     * fromQuery() / columns() form. Bindings come from the source
+     * SELECT — we don't add any of our own.
+     *
+     * @return array{0: string, 1: array<int, mixed>}
+     */
+    private function renderInsertSelect(): array
+    {
+        if ($this->sourceColumns === []) {
+            throw new \LogicException(
+                'fromQuery() requires columns() to be set so the target column list is explicit',
+            );
+        }
+        $escapedTable   = '`' . trim((string)$this->table, '`') . '`';
+        $escapedColumns = array_map(
+            fn (string $c) => '`' . trim($c, '`') . '`',
+            $this->sourceColumns,
+        );
+        [$selectSql, $bindings] = $this->sourceQuery->toSql();
+
+        $sql = 'INSERT INTO ' . $escapedTable
+             . ' (' . implode(', ', $escapedColumns) . ')'
+             . ' ' . $selectSql;
+
+        if ($this->ignore) {
+            $sql = $this->applyIgnore($sql);
+        }
+        if ($this->returning !== []) {
+            $sql .= ' RETURNING ' . implode(', ', $this->returning);
+        }
         return [$sql, $bindings];
     }
 }
