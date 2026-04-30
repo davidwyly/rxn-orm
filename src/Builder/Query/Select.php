@@ -43,6 +43,14 @@ class Select extends Query
     {
         $clauses = preg_split('#\s*,\s*#', trim($entry), -1, PREG_SPLIT_NO_EMPTY);
         foreach ($clauses as $clause) {
+            // `table.*` is the SQL wildcard form; preserve it verbatim
+            // since cleanReference would otherwise mangle the `*` into
+            // a quoted identifier.
+            if (str_ends_with($clause, '.*')) {
+                $table = substr($clause, 0, -2);
+                $this->addCommand($command, '`' . trim($table, '`') . '`.*');
+                continue;
+            }
             $splits = preg_split('#\s+[aA][sS]\s+#', $clause);
             if (count($splits) === 2) {
                 $reference = $this->cleanReference(array_shift($splits));

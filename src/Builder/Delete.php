@@ -23,6 +23,7 @@ use Rxn\Orm\Builder;
 final class Delete extends Builder implements Buildable
 {
     use HasWhere;
+    use HasConnection;
 
     private ?string $table = null;
     private bool    $allow_empty_where = false;
@@ -58,6 +59,23 @@ final class Delete extends Builder implements Buildable
             $this->returning[] = $col instanceof Raw ? $col->sql : '`' . trim((string)$col, '`') . '`';
         }
         return $this;
+    }
+
+    public function hasReturning(): bool
+    {
+        return $this->returning !== [];
+    }
+
+    /**
+     * Run this DELETE against the attached Connection. Returns
+     * RETURNING rows when returning() was used, otherwise affected
+     * row count.
+     *
+     * @return int|array<int, array<string, mixed>>
+     */
+    public function execute(): int|array
+    {
+        return $this->requireConnection(__FUNCTION__)->delete($this);
     }
 
     public function toSql(): array

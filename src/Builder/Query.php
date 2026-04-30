@@ -16,6 +16,7 @@ use Rxn\Orm\Builder\Query\Join;
 class Query extends Builder implements Buildable
 {
     use HasWhere;
+    use HasConnection;
 
     public function select(array $columns = ['*'], bool $distinct = false): Query
     {
@@ -179,5 +180,151 @@ class Query extends Builder implements Buildable
     {
         $parser = new QueryParser($this);
         return [$parser->getSql(), array_values($this->bindings)];
+    }
+
+    // -- terminal methods (require an attached Connection) -------------
+
+    /**
+     * Execute and return all matching rows as associative arrays.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function get(): array
+    {
+        return $this->requireConnection(__FUNCTION__)->select($this);
+    }
+
+    /**
+     * Execute and return the first matching row, or null. Returns
+     * `array<string, mixed>|null` from a plain Query; subclasses
+     * (e.g. ModelQuery) may return hydrated objects, hence the loose
+     * `mixed` return type — the array shape is the docblock contract.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function first(): mixed
+    {
+        $clone = clone $this;
+        $clone->limit(1);
+        $rows = $clone->requireConnection(__FUNCTION__)->select($clone);
+        return $rows[0] ?? null;
+    }
+
+    /**
+     * Find a row by primary key. Same return-type caveat as first().
+     *
+     * @return array<string, mixed>|null
+     */
+    public function find(mixed $id, string $pk = 'id'): mixed
+    {
+        $clone = clone $this;
+        $clone->where($pk, '=', $id)->limit(1);
+        $rows = $clone->requireConnection(__FUNCTION__)->select($clone);
+        return $rows[0] ?? null;
+    }
+
+    /**
+     * Execute and return the value of a single column from the first
+     * matching row.
+     */
+    public function value(string $column): mixed
+    {
+        $row = $this->first();
+        return $row === null ? null : ($row[$column] ?? null);
+    }
+
+    /**
+     * Execute and return a column from every matching row, optionally
+     * keyed by another column.
+     *
+     * @return array<int|string, mixed>
+     */
+    public function pluck(string $column, ?string $key = null): array
+    {
+        return $this->requireConnection(__FUNCTION__)->pluck($this, $column, $key);
+    }
+
+    public function exists(): bool
+    {
+        return $this->requireConnection(__FUNCTION__)->exists($this);
+    }
+
+    public function count(string $column = '*'): int
+    {
+        return $this->requireConnection(__FUNCTION__)->count($this, $column);
+    }
+
+    /**
+     * Run two queries: a count for the total, and a windowed SELECT
+     * for the page. Returns
+     *   ['data' => array, 'total' => int, 'page' => int,
+     *    'perPage' => int, 'lastPage' => int]
+     *
+     * @return array{data: array<int, array<string, mixed>>, total: int, page: int, perPage: int, lastPage: int}
+     */
+    public function paginate(int $perPage, int $page = 1): array
+    {
+        if ($perPage < 1) {
+            throw new \InvalidArgumentException('perPage must be >= 1');
+        }
+        if ($page < 1) {
+            throw new \InvalidArgumentException('page must be >= 1');
+        }
+        $connection = $this->requireConnection(__FUNCTION__);
+        $total = $connection->count($this);
+        $clone = clone $this;
+        $clone->limit($perPage)->offset(($page - 1) * $perPage);
+        return [
+            'data'     => $connection->select($clone),
+            'total'    => $total,
+            'page'     => $page,
+            'perPage'  => $perPage,
+            'lastPage' => (int)max(1, ceil($total / $perPage)),
+        ];
+    }
+
+    /**
+     * Process the result set in fixed-size chunks. Re-runs the query
+     * each iteration with an increasing OFFSET. Return false from
+     * $callback to stop early.
+     *
+     * @param callable(array<int, array<string, mixed>>): mixed $callback
+     */
+    public function chunk(int $size, callable $callback): void
+    {
+        if ($size < 1) {
+            throw new \InvalidArgumentException('chunk size must be >= 1');
+        }
+        $this->requireConnection(__FUNCTION__);
+        $page = 1;
+        do {
+            $clone = clone $this;
+            $clone->limit($size)->offset(($page - 1) * $size);
+            $rows = $clone->get();
+            if ($rows === []) {
+                return;
+            }
+            if ($callback($rows) === false) {
+                return;
+            }
+            $page++;
+        } while (count($rows) === $size);
+    }
+
+    /**
+     * Stream rows one at a time via a generator. Uses a single
+     * unbuffered statement; suitable for large result sets where
+     * loading everything into memory would be wasteful.
+     *
+     * @return \Generator<int, array<string, mixed>>
+     */
+    public function cursor(): \Generator
+    {
+        $connection = $this->requireConnection(__FUNCTION__);
+        [$sql, $bindings] = $this->toSql();
+        $stmt = $connection->statement($sql, $bindings);
+        while (($row = $stmt->fetch(\PDO::FETCH_ASSOC)) !== false) {
+            yield $row;
+        }
     }
 }

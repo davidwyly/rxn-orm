@@ -1,0 +1,1 @@
+CREATE TABLE no_down (id INTEGER PRIMARY KEY);
