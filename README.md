@@ -4,11 +4,12 @@
 [![PHP Version](https://img.shields.io/packagist/php-v/davidwyly/rxn-orm.svg)](https://packagist.org/packages/davidwyly/rxn-orm)
 [![License](https://img.shields.io/packagist/l/davidwyly/rxn-orm.svg)](LICENSE)
 
-A lightweight ORM for PHP 8.1+. Three layers, each usable on its own:
+A lightweight ORM for PHP 8.1+. Four layers, each usable on its own:
 
 1. **`Rxn\Orm\Builder`** — Composable SQL builders. `(new Query())->...->toSql()` returns `[string $sql, array $bindings]` you can hand to any PDO. Zero dependencies beyond `ext-pdo`.
 2. **`Rxn\Orm\Db\Connection`** — Thin wrapper over a PDO you provide. Adds terminals (`get/first/find/value/pluck/exists/count/paginate/chunk/cursor`), nested transactions via savepoints, read/write split, query profiling, and execution helpers for the write builders.
 3. **`Rxn\Orm\Model\Record`** — Active-record base class. Hydrating reads, dirty-aware writes, casts, eager loading (`with('orders.items')`) that kills N+1 in one extra query per relation. Soft deletes, auto-timestamps, `belongsToMany` with attach/detach/sync.
+4. **`Rxn\Orm\Resource\RxnOrmCrudHandler`** — Default `CrudHandler` implementation for the [rxn framework's](https://github.com/davidwyly/rxn) `ResourceRegistrar`. Extend, set `TABLE` constant, get a fully wired five-route HTTP CRUD family. Opt-in (framework lives in `suggest`); apps using just the SQL builders stay zero-dep.
 
 Plus an opt-in **`Rxn\Orm\Migration\Runner`** for raw `.sql` migration files.
 
@@ -340,6 +341,52 @@ $runner->rollback(1);   // undo most recent batch
 ```
 
 Migration files are plain `.sql`, named `NNNN_description.sql` with optional `NNNN_description.down.sql` siblings for rollback. Tracking lives in a `rxn_migrations` table created on first run. **No Schema DSL** — write the SQL you want; we just sequence and track it. (The Blueprint-style DSLs are where lightweight ORMs become heavyweight; we deliberately don't go there.)
+
+---
+
+## CRUD scaffolding (`Rxn\Orm\Resource\RxnOrmCrudHandler`)
+
+Default implementation of the [`davidwyly/rxn`](https://github.com/davidwyly/rxn) framework's `Rxn\Framework\Http\Resource\CrudHandler` interface. Subclass, set `TABLE`, get a fully wired five-method handler — the rxn framework's `ResourceRegistrar::register()` then turns it into the standard create / read / update / delete / search route family.
+
+```php
+use Rxn\Framework\Http\Resource\ResourceRegistrar;
+use Rxn\Orm\Builder\Query;
+use Rxn\Orm\Resource\RxnOrmCrudHandler;
+
+final class ProductsCrud extends RxnOrmCrudHandler
+{
+    public const TABLE = 'products';
+
+    // Translate the search DTO into WHERE clauses (the only
+    // override most apps need).
+    protected function applyFilter(Query $q, RequestDto $filter): Query
+    {
+        if ($filter instanceof SearchProducts && $filter->status !== null) {
+            $q->where('status', '=', $filter->status);
+        }
+        return $q;
+    }
+}
+
+ResourceRegistrar::register($router, '/products',
+    new ProductsCrud($db),
+    create: CreateProduct::class,
+    update: UpdateProduct::class,
+    search: SearchProducts::class,
+);
+```
+
+The `RxnOrmCrudHandler` is **opt-in**: the framework dependency is in `suggest`, not `require`, so apps using rxn-orm purely for SQL builders + Connection stay zero-dependency. `composer require davidwyly/rxn` to use it.
+
+What the base class gives you:
+
+- `create($dto)` — INSERT then re-read by `lastInsertId()`, so server-side defaults (auto-increment, defaults, generated columns) come back to the caller.
+- `read($id)` — single-row SELECT scoped to the configured `PK` column.
+- `update($id, $dto)` — read, partial-merge non-null DTO fields (PATCH semantics), UPDATE, re-read.
+- `delete($id)` — DELETE; returns `bool` so the registrar maps to 204 / 404.
+- `search($filter)` — SELECT with optional `applyFilter()` translation; default is pass-through.
+
+Override hooks: `applyFilter(Query, RequestDto): Query` for search WHERE clauses, `dtoToRow(RequestDto, bool $partial): array` when DTO field names diverge from column names. Custom PK columns: override `public const PK = 'uuid';`.
 
 ---
 

@@ -10,12 +10,20 @@
         "php": "^8.1",
         "ext-pdo": "*"
     },
+    "repositories": [
+        {
+            "type": "vcs",
+            "url": "https://github.com/davidwyly/rxn"
+        }
+    ],
     "require-dev": {
         "phpunit/phpunit": "^10.5",
         "phpstan/phpstan": "^2.1",
-        "friendsofphp/php-cs-fixer": "^3.95"
+        "friendsofphp/php-cs-fixer": "^3.95",
+        "davidwyly/rxn": "dev-master"
     },
     "suggest": {
+        "davidwyly/rxn": "^0.1 — install when using `Rxn\\Orm\\Resource\\RxnOrmCrudHandler`. The handler implements the framework's `Rxn\\Framework\\Http\\Resource\\CrudHandler` interface; rxn-orm's runtime stays standalone (zero deps beyond ext-pdo) for apps using just the SQL builder.",
         "illuminate/database": "Install for the benchmark suite to compare against Eloquent",
         "doctrine/orm": "Install for the benchmark suite to compare against Doctrine ORM"
     },
