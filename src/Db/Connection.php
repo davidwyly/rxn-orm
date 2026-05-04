@@ -178,7 +178,7 @@ class Connection
 
     /**
      * @param Bindings $bindings
-     * @return array<int, array<string, mixed>>
+     * @return list<array<string, mixed>>
      */
     public function select(Query|string $sqlOrQuery, array $bindings = []): array
     {

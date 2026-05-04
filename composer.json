@@ -1,13 +1,13 @@
 {
     "name": "davidwyly/rxn-orm",
-    "description": "Lightweight ORM for PHP 8.1+: fluent SQL builder, PDO connection wrapper with nested transactions, hydrating active records with eager loading and casts. ~3k lines, zero runtime deps beyond ext-pdo.",
+    "description": "Lightweight ORM for PHP 8.2+: fluent SQL builder, PDO connection wrapper with nested transactions, hydrating active records with eager loading and casts. ~3k lines, zero runtime deps beyond ext-pdo.",
     "license": "MIT",
     "keywords": ["sql", "query-builder", "orm", "active-record", "pdo", "eloquent", "rxn"],
     "authors": [
         { "name": "David Wyly", "email": "david.wyly@gmail.com" }
     ],
     "require": {
-        "php": "^8.1",
+        "php": "^8.2",
         "ext-pdo": "*"
     },
     "repositories": [

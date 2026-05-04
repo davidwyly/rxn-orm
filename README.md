@@ -4,7 +4,7 @@
 [![PHP Version](https://img.shields.io/packagist/php-v/davidwyly/rxn-orm.svg)](https://packagist.org/packages/davidwyly/rxn-orm)
 [![License](https://img.shields.io/packagist/l/davidwyly/rxn-orm.svg)](LICENSE)
 
-A lightweight ORM for PHP 8.1+. Four layers, each usable on its own:
+A lightweight ORM for PHP 8.2+. Four layers, each usable on its own:
 
 1. **`Rxn\Orm\Builder`** — Composable SQL builders. `(new Query())->...->toSql()` returns `[string $sql, array $bindings]` you can hand to any PDO. Zero dependencies beyond `ext-pdo`.
 2. **`Rxn\Orm\Db\Connection`** — Thin wrapper over a PDO you provide. Adds terminals (`get/first/find/value/pluck/exists/count/paginate/chunk/cursor`), nested transactions via savepoints, read/write split, query profiling, and execution helpers for the write builders.
@@ -48,7 +48,7 @@ Connection-layer terminals (skipping hydration) match raw PDO at the floor — t
 composer require davidwyly/rxn-orm
 ```
 
-Requires **PHP 8.1+** and **ext-pdo**. Works with MySQL, PostgreSQL, and SQLite.
+Requires **PHP 8.2+** and **ext-pdo**. Works with MySQL, PostgreSQL, and SQLite.
 
 ---
 
@@ -494,7 +494,7 @@ composer install
 vendor/bin/phpunit
 ```
 
-171 tests, 349 assertions. Runs against in-memory SQLite by default. Set `RXN_ORM_MYSQL_DSN` / `RXN_ORM_PGSQL_DSN` env vars to also exercise the driver-specific integration tests. CI matrix runs PHP 8.1/8.2/8.3 against SQLite, MySQL 8, and Postgres 16.
+171 tests, 349 assertions. Runs against in-memory SQLite by default. Set `RXN_ORM_MYSQL_DSN` / `RXN_ORM_PGSQL_DSN` env vars to also exercise the driver-specific integration tests. CI matrix runs PHP 8.2/8.3 against SQLite, MySQL 8, and Postgres 16.
 
 ## Benchmarks
 
