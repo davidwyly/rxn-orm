@@ -3,9 +3,9 @@
 namespace Rxn\Orm\Builder;
 
 use Rxn\Orm\Builder;
-use Rxn\Orm\Builder\Query\Select;
 use Rxn\Orm\Builder\Query\From;
 use Rxn\Orm\Builder\Query\Join;
+use Rxn\Orm\Builder\Query\Select;
 
 /**
  * Fluent SELECT query builder. Accumulates commands into
@@ -16,8 +16,53 @@ use Rxn\Orm\Builder\Query\Join;
 class Query extends Builder implements Buildable
 {
     use HasWhere;
+    use HasConnection;
 
+    /** Row-level lock to apply: 'update', 'shared', or null. */
+    private ?string $lock = null;
+
+    /** Concurrency modifier on the lock: null, 'skip-locked', 'no-wait'. */
+    private ?string $lockMode = null;
+
+    /**
+     * Queued UNION / UNION ALL clauses, in order. Each entry is
+     *   ['kind' => 'distinct'|'all', 'sql' => string, 'bindings' => array]
+     * The base query's WHERE/GROUP BY/HAVING apply to the first
+     * SELECT only; ORDER BY/LIMIT/OFFSET apply to the COMBINED
+     * result (each leaf gets wrapped in parens at toSql time).
+     *
+     * @var array<int, array{kind: string, sql: string, bindings: array<int|string, mixed>}>
+     */
+    private array $unions = [];
+
+    /**
+     * Set the SELECT column list. Calling with explicit columns
+     * REPLACES any prior selection — this matches user intent when
+     * coming off `Connection::table()` (which seeds `SELECT *`) and
+     * matches Eloquent's behavior. To append columns to an existing
+     * selection use `addSelect()` or `selectSubquery()`.
+     *
+     * @param array<int|string, string|Raw> $columns
+     */
     public function select(array $columns = ['*'], bool $distinct = false): Query
+    {
+        if ($columns !== ['*']) {
+            unset($this->commands['SELECT'], $this->commands['SELECT DISTINCT']);
+        }
+        $select = new Select();
+        $select->set($columns, $distinct);
+        $this->loadCommands($select);
+        return $this;
+    }
+
+    /**
+     * Append columns to the existing SELECT list (additive). Use this
+     * when you want to keep prior columns and add more — e.g. when
+     * stitching together a query in pieces.
+     *
+     * @param array<int|string, string|Raw> $columns
+     */
+    public function addSelect(array $columns, bool $distinct = false): Query
     {
         $select = new Select();
         $select->set($columns, $distinct);
@@ -54,9 +99,9 @@ class Query extends Builder implements Buildable
 
     /**
      * @param string|Buildable $table bare identifier, or a nested
-     *        Buildable whose SQL becomes `(subquery) AS alias`.
+     *                                Buildable whose SQL becomes `(subquery) AS alias`.
      */
-    public function from($table, ?string $alias = null): Query
+    public function from(string|Buildable $table, ?string $alias = null): Query
     {
         if ($table instanceof Buildable) {
             if ($alias === null || $alias === '') {
@@ -76,6 +121,9 @@ class Query extends Builder implements Buildable
         return $this;
     }
 
+    /**
+     * @param callable(Join): void $callable
+     */
     public function joinCustom(string $table, callable $callable, ?string $alias = null, string $type = 'inner'): Query
     {
         $join = new Join();
@@ -86,27 +134,27 @@ class Query extends Builder implements Buildable
         return $this;
     }
 
-    public function join(string $table, string $first_operand, string $operator, $second_operand, ?string $alias = null): Query
+    public function join(string $table, string $first_operand, string $operator, string|Raw $second_operand, ?string $alias = null): Query
     {
         return $this->innerJoin($table, $first_operand, $operator, $second_operand, $alias);
     }
 
-    public function innerJoin(string $table, string $first_operand, string $operator, $second_operand, ?string $alias = null): Query
+    public function innerJoin(string $table, string $first_operand, string $operator, string|Raw $second_operand, ?string $alias = null): Query
     {
         return $this->simpleJoin('inner', $table, $first_operand, $operator, $second_operand, $alias);
     }
 
-    public function leftJoin(string $table, string $first_operand, string $operator, $second_operand, ?string $alias = null): Query
+    public function leftJoin(string $table, string $first_operand, string $operator, string|Raw $second_operand, ?string $alias = null): Query
     {
         return $this->simpleJoin('left', $table, $first_operand, $operator, $second_operand, $alias);
     }
 
-    public function rightJoin(string $table, string $first_operand, string $operator, $second_operand, ?string $alias = null): Query
+    public function rightJoin(string $table, string $first_operand, string $operator, string|Raw $second_operand, ?string $alias = null): Query
     {
         return $this->simpleJoin('right', $table, $first_operand, $operator, $second_operand, $alias);
     }
 
-    private function simpleJoin(string $type, string $table, string $first_operand, string $operator, $second_operand, ?string $alias): Query
+    private function simpleJoin(string $type, string $table, string $first_operand, string $operator, string|Raw $second_operand, ?string $alias): Query
     {
         return $this->joinCustom($table, function (Join $join) use ($first_operand, $operator, $second_operand, $alias) {
             if (!empty($alias)) {
@@ -116,15 +164,12 @@ class Query extends Builder implements Buildable
         }, $alias, $type);
     }
 
-    public function whereId($id, string $id_key = 'id'): Query
+    public function whereId(mixed $id, string $id_key = 'id'): Query
     {
         return $this->where($id_key, '=', $id);
     }
 
-    /**
-     * @param string|Raw ...$fields
-     */
-    public function groupBy(...$fields): Query
+    public function groupBy(string|Raw ...$fields): Query
     {
         foreach ($fields as $field) {
             $this->commands['GROUP BY'][] = $this->cleanReference($field);
@@ -138,10 +183,7 @@ class Query extends Builder implements Buildable
         return $this;
     }
 
-    /**
-     * @param string|Raw $field
-     */
-    public function orderBy($field, string $direction = 'ASC'): Query
+    public function orderBy(string|Raw $field, string $direction = 'ASC'): Query
     {
         $direction = strtoupper($direction);
         if ($direction !== 'ASC' && $direction !== 'DESC') {
@@ -170,14 +212,355 @@ class Query extends Builder implements Buildable
     }
 
     /**
+     * Append a UNION (DISTINCT) of $other to this query. Both queries
+     * must have the same number of result columns in the same order.
+     * Bindings from $other merge into the combined query's binding
+     * stream in order.
+     *
+     * ORDER BY / LIMIT / OFFSET on the outer query apply to the
+     * COMBINED result — each side gets wrapped in parens, then the
+     * outer clauses appear at the end.
+     */
+    public function union(Buildable $other): Query
+    {
+        return $this->addUnion($other, 'distinct');
+    }
+
+    /** Same as union() but uses UNION ALL — duplicates preserved. */
+    public function unionAll(Buildable $other): Query
+    {
+        return $this->addUnion($other, 'all');
+    }
+
+    private function addUnion(Buildable $other, string $kind): Query
+    {
+        [$sql, $bindings] = $other->toSql();
+        $this->unions[] = ['kind' => $kind, 'sql' => $sql, 'bindings' => $bindings];
+        return $this;
+    }
+
+    /**
+     * Acquire a row-level write lock. Driver-aware:
+     *   - MySQL/MariaDB: `FOR UPDATE`
+     *   - Postgres:      `FOR UPDATE`
+     *   - SQLite:        no-op (no row-level locking concept)
+     *
+     * Only meaningful inside a transaction. Outside a transaction
+     * the lock is released the moment the statement completes.
+     */
+    public function lockForUpdate(): Query
+    {
+        $this->lock = 'update';
+        return $this;
+    }
+
+    /**
+     * Acquire a row-level read (shared) lock. Driver-aware:
+     *   - MySQL:    `LOCK IN SHARE MODE` (or `FOR SHARE` when paired
+     *               with skipLocked()/noWait() — the legacy form
+     *               doesn't accept those modifiers)
+     *   - MariaDB:  same as MySQL
+     *   - Postgres: `FOR SHARE`
+     *   - SQLite:   no-op
+     */
+    public function sharedLock(): Query
+    {
+        $this->lock = 'shared';
+        return $this;
+    }
+
+    /**
+     * Append `SKIP LOCKED` to the row lock. The classic job-queue
+     * pattern: workers each `SELECT … LIMIT N FOR UPDATE SKIP LOCKED`
+     * to claim a batch without contending on already-claimed rows.
+     *
+     * Requires MySQL 8.0+ or Postgres 9.5+. SQLite has no row locks
+     * and silently no-ops the entire lock clause. Must be chained
+     * after `lockForUpdate()` or `sharedLock()`.
+     */
+    public function skipLocked(): Query
+    {
+        $this->requireLock(__FUNCTION__);
+        $this->lockMode = 'skip-locked';
+        return $this;
+    }
+
+    /**
+     * Append `NOWAIT` to the row lock. Causes the statement to fail
+     * immediately with a "could not obtain lock" error rather than
+     * blocking on contended rows. Useful for "try-lock" patterns
+     * where the caller has a fallback.
+     *
+     * Requires MySQL 8.0+ or Postgres. SQLite no-ops. Must be chained
+     * after `lockForUpdate()` or `sharedLock()`.
+     */
+    public function noWait(): Query
+    {
+        $this->requireLock(__FUNCTION__);
+        $this->lockMode = 'no-wait';
+        return $this;
+    }
+
+    private function requireLock(string $method): void
+    {
+        if ($this->lock === null) {
+            throw new \LogicException(
+                "Query::$method requires a prior lockForUpdate() or sharedLock() call",
+            );
+        }
+    }
+
+    /**
      * Materialize the builder state into a single SQL string +
      * positional-bindings array.
      *
-     * @return array{0: string, 1: array}
+     * @return array{0: string, 1: array<int|string, mixed>}
      */
     public function toSql(): array
     {
+        if ($this->unions !== []) {
+            return $this->toSqlWithUnions();
+        }
         $parser = new QueryParser($this);
-        return [$parser->getSql(), array_values($this->bindings)];
+        $sql    = $parser->getSql();
+        if ($this->lock !== null) {
+            $sql .= $this->renderLockClause();
+        }
+        return [$sql, array_values($this->bindings)];
+    }
+
+    /**
+     * Render the UNION form: `(base) UNION (other) ... ORDER BY ... LIMIT ...`.
+     * The base's ORDER BY / LIMIT / OFFSET are stripped (so they don't
+     * accidentally apply only to the first SELECT) and re-emitted at
+     * the end against the combined result. Locks are attached to the
+     * combined statement, not the base.
+     *
+     * @return array{0: string, 1: array<int|string, mixed>}
+     */
+    private function toSqlWithUnions(): array
+    {
+        // Render the base WITHOUT outer-result clauses so they don't
+        // accidentally bind only to the first SELECT.
+        $baseClone = clone $this;
+        $baseClone->unions = [];
+        $baseClone->lock   = null;
+        unset(
+            $baseClone->commands['ORDER BY'],
+            $baseClone->commands['LIMIT'],
+            $baseClone->commands['OFFSET'],
+        );
+        [$baseSql, $baseBindings] = $baseClone->toSql();
+
+        // No parens around each side — SQLite rejects them; MySQL and
+        // Postgres accept both forms. Sub-queries with their own
+        // ORDER BY/LIMIT aren't valid in a UNION leaf per SQL standard
+        // anyway; users who need that should compose via from(subquery).
+        $parts    = [$baseSql];
+        $bindings = $baseBindings;
+        foreach ($this->unions as $u) {
+            $glue   = $u['kind'] === 'all' ? 'UNION ALL' : 'UNION';
+            $parts[] = $glue . ' ' . $u['sql'];
+            foreach ($u['bindings'] as $b) {
+                $bindings[] = $b;
+            }
+        }
+        $sql = implode(' ', $parts);
+
+        // Outer clauses against the combined result.
+        if (!empty($this->commands['ORDER BY'])) {
+            $sql .= ' ORDER BY ' . implode(', ', $this->commands['ORDER BY']);
+        }
+        if (!empty($this->commands['LIMIT'])) {
+            $sql .= ' LIMIT ' . $this->commands['LIMIT'][0];
+        }
+        if (!empty($this->commands['OFFSET'])) {
+            $sql .= ' OFFSET ' . $this->commands['OFFSET'][0];
+        }
+        if ($this->lock !== null) {
+            $sql .= $this->renderLockClause();
+        }
+        return [$sql, $bindings];
+    }
+
+    /**
+     * Resolve the driver-specific row-locking suffix. Silent no-op
+     * for SQLite or when no Connection is attached — locking outside
+     * a known driver is meaningless.
+     *
+     * For shared locks combined with SKIP LOCKED / NOWAIT on MySQL
+     * we use the modern `FOR SHARE` form; the legacy
+     * `LOCK IN SHARE MODE` doesn't accept those modifiers (and is
+     * deprecated in MySQL 8 anyway). MariaDB follows the same rule.
+     */
+    private function renderLockClause(): string
+    {
+        $driver = $this->connection?->getDriver();
+        $suffix = match ($this->lockMode) {
+            'skip-locked' => ' SKIP LOCKED',
+            'no-wait'     => ' NOWAIT',
+            default       => '',
+        };
+
+        $sharedNeedsForShare = $this->lockMode !== null;
+
+        return match ([$driver, $this->lock]) {
+            ['mysql',   'update'] => ' FOR UPDATE' . $suffix,
+            ['mariadb', 'update'] => ' FOR UPDATE' . $suffix,
+            ['pgsql',   'update'] => ' FOR UPDATE' . $suffix,
+            ['pgsql',   'shared'] => ' FOR SHARE' . $suffix,
+            ['mysql',   'shared'], ['mariadb', 'shared'] => $sharedNeedsForShare
+                ? ' FOR SHARE' . $suffix
+                : ' LOCK IN SHARE MODE',
+            default => '', // sqlite + unknown drivers
+        };
+    }
+
+    // -- terminal methods (require an attached Connection) -------------
+
+    /**
+     * Execute and return all matching rows as associative arrays.
+     * Subclasses (notably ModelQuery) may narrow the element type to
+     * a hydrated object — the loose `array` return is intentional.
+     *
+     * @return array<int, mixed>
+     */
+    public function get(): array
+    {
+        return $this->requireConnection(__FUNCTION__)->select($this);
+    }
+
+    /**
+     * Execute and return the first matching row, or null. Returns
+     * `array<string, mixed>|null` from a plain Query; subclasses
+     * (e.g. ModelQuery) may return hydrated objects, hence the loose
+     * `mixed` return type — the array shape is the docblock contract.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function first(): mixed
+    {
+        $clone = clone $this;
+        $clone->limit(1);
+        $rows = $clone->requireConnection(__FUNCTION__)->select($clone);
+        return $rows[0] ?? null;
+    }
+
+    /**
+     * Find a row by primary key. Same return-type caveat as first().
+     *
+     * @return array<string, mixed>|null
+     */
+    public function find(mixed $id, string $pk = 'id'): mixed
+    {
+        $clone = clone $this;
+        $clone->where($pk, '=', $id)->limit(1);
+        $rows = $clone->requireConnection(__FUNCTION__)->select($clone);
+        return $rows[0] ?? null;
+    }
+
+    /**
+     * Execute and return the value of a single column from the first
+     * matching row.
+     */
+    public function value(string $column): mixed
+    {
+        $row = $this->first();
+        return $row === null ? null : ($row[$column] ?? null);
+    }
+
+    /**
+     * Execute and return a column from every matching row, optionally
+     * keyed by another column.
+     *
+     * @return array<int|string, mixed>
+     */
+    public function pluck(string $column, ?string $key = null): array
+    {
+        return $this->requireConnection(__FUNCTION__)->pluck($this, $column, $key);
+    }
+
+    public function exists(): bool
+    {
+        return $this->requireConnection(__FUNCTION__)->exists($this);
+    }
+
+    public function count(string $column = '*'): int
+    {
+        return $this->requireConnection(__FUNCTION__)->count($this, $column);
+    }
+
+    /**
+     * Run two queries: a count for the total, and a windowed SELECT
+     * for the page. Returns
+     *   ['data' => array, 'total' => int, 'page' => int,
+     *    'perPage' => int, 'lastPage' => int]
+     *
+     * @return array{data: array<int, array<string, mixed>>, total: int, page: int, perPage: int, lastPage: int}
+     */
+    public function paginate(int $perPage, int $page = 1): array
+    {
+        if ($perPage < 1) {
+            throw new \InvalidArgumentException('perPage must be >= 1');
+        }
+        if ($page < 1) {
+            throw new \InvalidArgumentException('page must be >= 1');
+        }
+        $connection = $this->requireConnection(__FUNCTION__);
+        $total = $connection->count($this);
+        $clone = clone $this;
+        $clone->limit($perPage)->offset(($page - 1) * $perPage);
+        return [
+            'data'     => $connection->select($clone),
+            'total'    => $total,
+            'page'     => $page,
+            'perPage'  => $perPage,
+            'lastPage' => (int)max(1, ceil($total / $perPage)),
+        ];
+    }
+
+    /**
+     * Process the result set in fixed-size chunks. Re-runs the query
+     * each iteration with an increasing OFFSET. Return false from
+     * $callback to stop early.
+     *
+     * @param callable(array<int, array<string, mixed>>): mixed $callback
+     */
+    public function chunk(int $size, callable $callback): void
+    {
+        if ($size < 1) {
+            throw new \InvalidArgumentException('chunk size must be >= 1');
+        }
+        $this->requireConnection(__FUNCTION__);
+        $page = 1;
+        do {
+            $clone = clone $this;
+            $clone->limit($size)->offset(($page - 1) * $size);
+            $rows = $clone->get();
+            if ($rows === []) {
+                return;
+            }
+            if ($callback($rows) === false) {
+                return;
+            }
+            $page++;
+        } while (count($rows) === $size);
+    }
+
+    /**
+     * Stream rows one at a time via a generator. Uses a single
+     * unbuffered statement; suitable for large result sets where
+     * loading everything into memory would be wasteful.
+     *
+     * @return \Generator<int, array<string, mixed>>
+     */
+    public function cursor(): \Generator
+    {
+        $connection = $this->requireConnection(__FUNCTION__);
+        [$sql, $bindings] = $this->toSql();
+        $stmt = $connection->selectStatement($sql, $bindings);
+        while (($row = $stmt->fetch(\PDO::FETCH_ASSOC)) !== false) {
+            yield $row;
+        }
     }
 }

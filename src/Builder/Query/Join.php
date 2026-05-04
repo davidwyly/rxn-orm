@@ -4,70 +4,78 @@ namespace Rxn\Orm\Builder\Query;
 
 use Rxn\Orm\Builder;
 
+/**
+ * Internal sub-builder used by Query::joinCustom() to accumulate the
+ * pieces of a single JOIN clause (target table, alias, ON-conditions).
+ * Once `set()` returns, the parent Query merges this Join's commands
+ * + table-aliases via `loadCommands()` / `loadTableAliases()`.
+ *
+ *   $join = new Join();
+ *   $join->set('orders', fn(Join $j) => $j->on('o.user_id', '=', 'u.id'), 'o', 'inner');
+ *   // $join->commands['INNER JOIN']['orders'] = ['AS' => [...], 'ON' => [...]]
+ */
 class Join extends Builder
 {
-    const JOIN_COMMANDS = [
+    public const JOIN_COMMANDS = [
         'inner' => 'INNER JOIN',
         'left'  => 'LEFT JOIN',
         'right' => 'RIGHT JOIN',
     ];
 
-    /**
-     * @var string
-     */
-    public $table;
+    public ?string $table = null;
+    public ?string $alias = null;
+
+    /** @var array<string, array<int, string>> e.g. ['ON' => [...], 'AS' => [...]] */
+    public array $modifiers = [];
 
     /**
-     * @var string
+     * Configure this join: target table, body callback (where the
+     * caller adds `on()` clauses), optional alias, and join kind.
+     *
+     * @param callable(Join): void $callable
      */
-    public $alias;
-
-    /**
-     * @var array
-     */
-    public $modifiers = [];
-
-    public function set(string $table, callable $callable, ?string $alias = null, string $type = 'inner') {
+    public function set(string $table, callable $callable, ?string $alias = null, string $type = 'inner'): void
+    {
         if (!array_key_exists($type, self::JOIN_COMMANDS)) {
-            throw new \Exception("");
+            throw new \InvalidArgumentException("Unknown join type '$type'");
         }
         $this->table = $table;
-        $this->addAlias($alias);
-        $command = self::JOIN_COMMANDS[$type];
-        call_user_func($callable, $this);
-        $this->addBindings($this->bindings);
-        $this->addCommandWithModifiers($command, $this->modifiers, $table);
-
-    }
-
-
-
-    public function as(string $alias) {
-        $this->alias = $alias;
-        $clean_alias = $this->cleanReference($alias);
-        if (!in_array($clean_alias, (array)($this->modifiers['AS'] ?? []))) {
-            $this->modifiers['AS'][]           = $clean_alias;
-            $this->table_aliases[$this->table] = $alias;
-        }
-        return $this;
-    }
-
-    public function on(string $first, string $condition, $second) {
-        $first = $this->cleanReference($first);
-        $second = $this->cleanReference($second);
-        $value = "$first $condition $second";
-        $this->modifiers['ON'][] = $value;
-        return $this;
-    }
-
-    private function addAlias($alias) {
-        if (!empty($alias)) {
+        if ($alias !== null && $alias !== '') {
             $this->as($alias);
         }
+        $command = self::JOIN_COMMANDS[$type];
+        $callable($this);
+        // Push the accumulated modifiers under [command][table] so the
+        // QueryParser can render `<JOIN> table AS alias ON …`.
+        $this->commands[$command][$table] = $this->modifiers;
     }
 
-    protected function addCommand($command, $value)
+    public function as(string $alias): self
     {
-        $this->commands[$command][] = $value;
+        $this->alias = $alias;
+        $cleanAlias  = $this->cleanReference($alias);
+        $existing    = $this->modifiers['AS'] ?? [];
+        if (!in_array($cleanAlias, $existing, true)) {
+            $this->modifiers['AS'][] = $cleanAlias;
+            if ($this->table !== null) {
+                $this->table_aliases[$this->table] = $alias;
+            }
+        }
+        return $this;
+    }
+
+    /**
+     * Add an ON-clause condition. Both operands are treated as
+     * column references (escaped, never bound), since JOIN ... ON
+     * comparisons are over identifiers, not values.
+     *
+     * @param string|\Rxn\Orm\Builder\Raw $second
+     */
+    public function on(string $first, string $condition, string|\Rxn\Orm\Builder\Raw $second): self
+    {
+        $left  = $this->cleanReference($first);
+        $right = $this->cleanReference($second);
+        $this->modifiers['ON'][] = "$left $condition $right";
+        return $this;
     }
 }

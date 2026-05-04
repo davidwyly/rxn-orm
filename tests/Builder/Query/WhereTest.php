@@ -58,7 +58,7 @@ final class WhereTest extends TestCase
 
         $this->assertSame(
             'SELECT * FROM `users` WHERE `active` = ? AND (`role` = ? OR `role` = ?)',
-            $sql
+            $sql,
         );
         $this->assertSame([1, 'admin', 'owner'], $bindings);
     }
@@ -78,7 +78,7 @@ final class WhereTest extends TestCase
 
         $this->assertSame(
             'SELECT * FROM `users` WHERE `tenant_id` = ? AND (`status` = ? OR (`status` = ? AND `trial_ends_at` > ?))',
-            $sql
+            $sql,
         );
         $this->assertSame([7, 'active', 'trial', '2026-04-18'], $bindings);
     }

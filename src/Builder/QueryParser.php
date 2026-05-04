@@ -36,6 +36,9 @@ class QueryParser
         return implode(' ', $parts);
     }
 
+    /**
+     * @return array<int|string, mixed>|null
+     */
     private function commands(string $key): ?array
     {
         return $this->builder->commands[$key] ?? null;
@@ -91,6 +94,7 @@ class QueryParser
         if ($wheres === null || $wheres === []) {
             return '';
         }
+        /** @var array<int, array{op?: string, expr?: string, group?: array<int, mixed>}> $wheres */
         return 'WHERE ' . $this->renderConditions($wheres);
     }
 
@@ -100,17 +104,13 @@ class QueryParser
     }
 
     /**
-     * @param array<int, array{op?: string, expr?: string, group?: array}> $conditions
+     * @param array<int, array{op?: string, expr?: string, group?: array<int, mixed>}> $conditions
      */
     private function renderConditions(array $conditions): string
     {
         $parts = [];
         $first = true;
         foreach ($conditions as $entry) {
-            // Back-compat: old code paths might still push a bare string.
-            if (is_string($entry)) {
-                $entry = ['op' => 'AND', 'expr' => $entry];
-            }
             $prefix = $first ? '' : (($entry['op'] ?? 'AND') . ' ');
             $first  = false;
             if (isset($entry['group'])) {

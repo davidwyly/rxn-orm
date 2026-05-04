@@ -24,8 +24,10 @@ use Rxn\Orm\Builder;
 final class Update extends Builder implements Buildable
 {
     use HasWhere;
+    use HasConnection;
 
     private ?string $table = null;
+    private bool    $allow_empty_where = false;
 
     /** @var array<string, mixed> */
     private array $set = [];
@@ -36,6 +38,17 @@ final class Update extends Builder implements Buildable
     public function table(string $table): self
     {
         $this->table = $table;
+        return $this;
+    }
+
+    /**
+     * Permit `UPDATE t SET ...` without a WHERE clause. Off by default
+     * — same safety guard as Delete::allowEmptyWhere(), since an
+     * UPDATE without WHERE rewrites every row in the table.
+     */
+    public function allowEmptyWhere(bool $allow = true): self
+    {
+        $this->allow_empty_where = $allow;
         return $this;
     }
 
@@ -52,6 +65,23 @@ final class Update extends Builder implements Buildable
         return $this;
     }
 
+    public function hasReturning(): bool
+    {
+        return $this->returning !== [];
+    }
+
+    /**
+     * Run this UPDATE against the attached Connection. Returns
+     * RETURNING rows when returning() was used, otherwise affected
+     * row count.
+     *
+     * @return int|array<int, array<string, mixed>>
+     */
+    public function execute(): int|array
+    {
+        return $this->requireConnection(__FUNCTION__)->update($this);
+    }
+
     /**
      * Merge column => value pairs into the SET clause. Called more
      * than once, later keys overwrite earlier ones.
@@ -66,6 +96,7 @@ final class Update extends Builder implements Buildable
         return $this;
     }
 
+    /** @return array{0: string, 1: array<int|string, mixed>} */
     public function toSql(): array
     {
         if ($this->table === null) {
@@ -73,6 +104,12 @@ final class Update extends Builder implements Buildable
         }
         if ($this->set === []) {
             throw new \LogicException('Update requires at least one set() assignment');
+        }
+        $hasWhere = !empty($this->commands['WHERE']);
+        if (!$hasWhere && !$this->allow_empty_where) {
+            throw new \LogicException(
+                'Update with no WHERE clause is blocked; call allowEmptyWhere() to opt in',
+            );
         }
 
         $setBindings   = [];

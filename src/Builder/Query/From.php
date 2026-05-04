@@ -4,9 +4,10 @@ namespace Rxn\Orm\Builder\Query;
 
 use Rxn\Orm\Builder\Query;
 
-class From extends Query {
-
-    public function set(string $table, ?string $alias = null) {
+class From extends Query
+{
+    public function set(string $table, ?string $alias = null): void
+    {
         $escaped_table = $this->escapeReference($table);
         if (empty($alias)) {
             $value = $escaped_table;

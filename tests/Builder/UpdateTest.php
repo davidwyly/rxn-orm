@@ -19,7 +19,7 @@ final class UpdateTest extends TestCase
 
         $this->assertSame(
             'UPDATE `users` SET `role` = ?, `active` = ? WHERE `id` = ?',
-            $sql
+            $sql,
         );
         $this->assertSame(['admin', 1, 42], $bindings);
     }
@@ -35,7 +35,7 @@ final class UpdateTest extends TestCase
 
         $this->assertSame(
             'UPDATE `users` SET `active` = ? WHERE `role` = ? AND `last_login_at` < ?',
-            $sql
+            $sql,
         );
         $this->assertSame([0, 'member', '2025-01-01'], $bindings);
     }
@@ -53,7 +53,7 @@ final class UpdateTest extends TestCase
         // active was added later, so it's appended.
         $this->assertSame(
             'UPDATE `users` SET `role` = ?, `active` = ? WHERE `id` = ?',
-            $sql
+            $sql,
         );
     }
 
@@ -67,7 +67,7 @@ final class UpdateTest extends TestCase
 
         $this->assertSame(
             'UPDATE `users` SET `updated_at` = NOW(), `role` = ? WHERE `id` = ?',
-            $sql
+            $sql,
         );
         $this->assertSame(['admin', 42], $bindings);
     }
@@ -85,7 +85,7 @@ final class UpdateTest extends TestCase
 
         $this->assertSame(
             'UPDATE `users` SET `active` = ? WHERE `tenant_id` = ? AND (`role` = ? OR `role` = ?)',
-            $sql
+            $sql,
         );
         $this->assertSame([0, 7, 'member', 'guest'], $bindings);
     }

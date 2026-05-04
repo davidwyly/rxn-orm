@@ -1,0 +1,114 @@
+#!/usr/bin/env php
+<?php declare(strict_types=1);
+
+/**
+ * rxn-migrate — minimal CLI wrapper around Rxn\Orm\Migration\Runner.
+ *
+ *   bin/rxn-migrate run                       # apply all pending
+ *   bin/rxn-migrate run --steps=1             # one at a time
+ *   bin/rxn-migrate rollback [--batches=1]    # undo most recent batch(es)
+ *   bin/rxn-migrate status                    # list applied / pending
+ *   bin/rxn-migrate reset                     # roll everything back
+ *
+ * Connection is read from these env vars (or --dsn / --user / --pass flags):
+ *   RXN_ORM_DSN  (e.g. mysql:host=127.0.0.1;dbname=app)
+ *   RXN_ORM_USER
+ *   RXN_ORM_PASS
+ *
+ * Migrations directory: ./migrations by default; override with --dir.
+ */
+
+// Locate vendor/autoload.php whether we're installed via composer or invoked
+// from inside the rxn-orm checkout itself.
+$autoloads = [
+    __DIR__ . '/../vendor/autoload.php',
+    __DIR__ . '/../../../autoload.php',
+];
+foreach ($autoloads as $path) {
+    if (is_file($path)) { require $path; break; }
+}
+
+use Rxn\Orm\Db\Connection;
+use Rxn\Orm\Migration\Runner;
+
+$args = array_slice($argv, 1);
+$flags = [];
+$positional = [];
+foreach ($args as $arg) {
+    if (str_starts_with($arg, '--')) {
+        [$k, $v] = array_pad(explode('=', substr($arg, 2), 2), 2, true);
+        $flags[$k] = $v;
+        continue;
+    }
+    $positional[] = $arg;
+}
+
+$command = $positional[0] ?? 'status';
+$dsn  = $flags['dsn']  ?? getenv('RXN_ORM_DSN')  ?: null;
+$user = $flags['user'] ?? getenv('RXN_ORM_USER') ?: null;
+$pass = $flags['pass'] ?? getenv('RXN_ORM_PASS') ?: '';
+$dir  = $flags['dir']  ?? './migrations';
+
+if ($dsn === null) {
+    fwrite(STDERR, "ERROR: --dsn or RXN_ORM_DSN required\n");
+    exit(2);
+}
+if (!is_dir($dir)) {
+    fwrite(STDERR, "ERROR: migrations directory not found: $dir\n");
+    exit(2);
+}
+
+try {
+    $pdo    = new PDO($dsn, $user, $pass);
+    $db     = new Connection($pdo);
+    $runner = new Runner($db, $dir);
+
+    switch ($command) {
+        case 'run':
+            $steps   = isset($flags['steps']) ? (int)$flags['steps'] : null;
+            $results = $runner->run($steps);
+            if ($results === []) {
+                echo "No pending migrations.\n";
+                break;
+            }
+            foreach ($results as $name => $state) {
+                echo "  [$state] $name\n";
+            }
+            break;
+        case 'rollback':
+            $batches = isset($flags['batches']) ? (int)$flags['batches'] : 1;
+            $results = $runner->rollback($batches);
+            if ($results === []) {
+                echo "Nothing to roll back.\n";
+                break;
+            }
+            foreach ($results as $name => $state) {
+                echo "  [$state] $name\n";
+            }
+            break;
+        case 'status':
+            $rows = $runner->status();
+            if ($rows === []) {
+                echo "No migrations found in $dir\n";
+                break;
+            }
+            foreach ($rows as $row) {
+                $batch = $row['batch'] !== null ? "batch $row[batch]" : '-';
+                printf("  %-9s  %-7s  %s\n", $row['state'], $batch, $row['name']);
+            }
+            break;
+        case 'reset':
+            $results = $runner->reset();
+            foreach ($results as $name => $state) {
+                echo "  [$state] $name\n";
+            }
+            break;
+        default:
+            fwrite(STDERR, "Unknown command: $command\n");
+            fwrite(STDERR, "Usage: rxn-migrate [run|rollback|status|reset] [--steps=N] [--dir=PATH] [--dsn=DSN] [--user=U] [--pass=P]\n");
+            exit(2);
+    }
+} catch (\Throwable $e) {
+    fwrite(STDERR, "ERROR: " . $e->getMessage() . "\n");
+    exit(1);
+}

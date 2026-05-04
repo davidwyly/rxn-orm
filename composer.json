@@ -1,23 +1,38 @@
 {
     "name": "davidwyly/rxn-orm",
-    "description": "Fluent SQL query builder (SELECT / INSERT / UPDATE / DELETE) with subqueries, upsert, and RETURNING. Extracted from the Rxn framework; usable standalone on any PDO connection.",
+    "description": "Lightweight ORM for PHP 8.2+: fluent SQL builder, PDO connection wrapper with nested transactions, hydrating active records with eager loading and casts. ~3k lines, zero runtime deps beyond ext-pdo.",
     "license": "MIT",
-    "keywords": ["sql", "query-builder", "orm", "pdo", "rxn"],
+    "keywords": ["sql", "query-builder", "orm", "active-record", "pdo", "eloquent", "rxn"],
     "authors": [
         { "name": "David Wyly", "email": "david.wyly@gmail.com" }
     ],
     "require": {
-        "php": "^8.1",
+        "php": "^8.2",
         "ext-pdo": "*"
     },
+    "repositories": [
+        {
+            "type": "vcs",
+            "url": "https://github.com/davidwyly/rxn"
+        }
+    ],
     "require-dev": {
-        "phpunit/phpunit": "^10.5"
+        "phpunit/phpunit": "^10.5",
+        "phpstan/phpstan": "^2.1",
+        "friendsofphp/php-cs-fixer": "^3.95",
+        "davidwyly/rxn": "dev-master"
+    },
+    "suggest": {
+        "davidwyly/rxn": "^0.1 — install when using `Rxn\\Orm\\Resource\\RxnOrmCrudHandler`. The handler implements the framework's `Rxn\\Framework\\Http\\Resource\\CrudHandler` interface; rxn-orm's runtime stays standalone (zero deps beyond ext-pdo) for apps using just the SQL builder.",
+        "illuminate/database": "Install for the benchmark suite to compare against Eloquent",
+        "doctrine/orm": "Install for the benchmark suite to compare against Doctrine ORM"
     },
     "autoload": {
         "psr-4": {
             "Rxn\\Orm\\": "src/"
         }
     },
+    "bin": ["bin/rxn-migrate"],
     "autoload-dev": {
         "psr-4": {
             "Rxn\\Orm\\Tests\\": "tests/"

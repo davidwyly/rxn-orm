@@ -1,0 +1,7 @@
+parameters:
+    level: 8
+    paths:
+        - src
+    # Tests use anonymous classes + per-test fixtures that are noisy
+    # under static analysis without adding coverage value. Run them
+    # separately if you want to lint test code too.

@@ -23,6 +23,7 @@ use Rxn\Orm\Builder;
 final class Delete extends Builder implements Buildable
 {
     use HasWhere;
+    use HasConnection;
 
     private ?string $table = null;
     private bool    $allow_empty_where = false;
@@ -60,6 +61,24 @@ final class Delete extends Builder implements Buildable
         return $this;
     }
 
+    public function hasReturning(): bool
+    {
+        return $this->returning !== [];
+    }
+
+    /**
+     * Run this DELETE against the attached Connection. Returns
+     * RETURNING rows when returning() was used, otherwise affected
+     * row count.
+     *
+     * @return int|array<int, array<string, mixed>>
+     */
+    public function execute(): int|array
+    {
+        return $this->requireConnection(__FUNCTION__)->delete($this);
+    }
+
+    /** @return array{0: string, 1: array<int|string, mixed>} */
     public function toSql(): array
     {
         if ($this->table === null) {
@@ -68,7 +87,7 @@ final class Delete extends Builder implements Buildable
         $hasWhere = !empty($this->commands['WHERE']);
         if (!$hasWhere && !$this->allow_empty_where) {
             throw new \LogicException(
-                'Delete with no WHERE clause is blocked; call allowEmptyWhere() to opt in'
+                'Delete with no WHERE clause is blocked; call allowEmptyWhere() to opt in',
             );
         }
 

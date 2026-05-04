@@ -18,7 +18,9 @@ namespace Rxn\Orm\Builder;
  */
 final class Raw
 {
-    public function __construct(public readonly string $sql) {}
+    public function __construct(public readonly string $sql)
+    {
+    }
 
     public static function of(string $sql): self
     {
